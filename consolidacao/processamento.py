@@ -1,13 +1,16 @@
 # Processamento de um arquivo completo e da pasta (secoes 6 e 7 do TRATAMENTO.R).
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
+from typing import Callable
 
 import openpyxl
 import pandas as pd
 
 from .cabecalhos import normalizar_nome, unificar_colunas
-from .config import CODIGO_UNICO
+from .config import CODIGO_UNICO, NOMES_SAIDA_LEGADOS, ORDEM_INICIAL, nome_saida
+from .datas import resumir_observacoes_datas
 from .empresas import empresa_da_referencia
 from .erros import ErroValidacao
 from .leitura import ler_dependente, ler_suplementar, ler_titular
@@ -224,3 +227,156 @@ def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
             observacoes_datas=observacoes_datas,
             divergencias_datas=divergencias_datas,
         )
+
+
+# ----------------------------------------------------------------------------
+# Processamento da pasta e consolidacao
+# ----------------------------------------------------------------------------
+
+COLUNAS_BASE_VAZIA = [
+    "REFERENCIA", "EMPRESA", "SubF", "NUMERO DO CERTIFICADO", CODIGO_UNICO,
+    "TITULARIDADE", "NOME DO SEGURADO", "NUMERO DO CARTAO", "NOME DA MAE",
+    "NOME DEPENDENTE", "CODIGO DO DEPENDENTE", "GRAU PARENTESCO", "PLANO",
+]
+
+COLUNAS_LOG = [
+    "ARQUIVO", "REFERENCIA", "CODIGO_EMPRESA", "EMPRESA", "STATUS", "TITULARES",
+    "DEPENDENTES", "AVISOS_ESTRUTURA", "DATAS_INVALIDAS", "OBSERVACOES_DATAS",
+    "QTD_DIVERGENCIAS_DATAS", "DIVERGENCIAS_DATAS", "MENSAGEM",
+    "OBSERVACAO_IDENTIFICADORES",
+]
+
+OBSERVACAO_IDENTIFICADORES = (
+    "Identificadores lidos como texto; zeros ausentes na origem nao foram reconstruidos."
+)
+
+
+@dataclass
+class Consolidado:
+    consolidado: pd.DataFrame
+    pendencias: pd.DataFrame
+    log: pd.DataFrame
+
+
+def listar_arquivos_entrada(pasta: Path, hoje: date) -> list:
+    pasta = Path(pasta)
+    if not pasta.is_dir():
+        raise ErroValidacao(f"A pasta de entrada nao existe: {pasta}")
+
+    excluir = {n.lower() for n in [nome_saida(hoje), *NOMES_SAIDA_LEGADOS]}
+    arquivos = [
+        p for p in pasta.iterdir()
+        if p.is_file()
+        and p.suffix.lower() == ".xlsx"
+        and not p.name.startswith("~$")
+        and p.name.lower() not in excluir
+        # Deixa de fora consolidacoes mensais anteriores, mesmo se o nome de saida mudar.
+        and not re.match(r"^PC_CONSOLIDADO_.*\.xlsx$", p.name, flags=re.IGNORECASE)
+    ]
+    arquivos.sort(key=lambda p: (p.name.casefold(), p.name))
+
+    if not arquivos:
+        raise ErroValidacao(f"Nenhum arquivo .xlsx de entrada encontrado em: {pasta}")
+    return arquivos
+
+
+def _tipo(valores) -> str | None:
+    for v in valores:
+        if isinstance(v, date):
+            return "date"
+        if v is not None:
+            return "character"
+    return None
+
+
+def _tipos(df: pd.DataFrame) -> dict:
+    return {c: _tipo(df[c].tolist()) for c in df.columns}
+
+
+def _incompatibilidade(tipos_acumulados: dict, df: pd.DataFrame) -> str | None:
+    for coluna, tipo in _tipos(df).items():
+        anterior = tipos_acumulados.get(coluna)
+        if tipo and anterior and tipo != anterior:
+            return f"Can't combine `{coluna}` <{anterior}> and `{coluna}` <{tipo}>."
+    return None
+
+
+def _chave_ordenacao(v):
+    # arrange() do dplyr compara texto no locale C; NA vai para o fim.
+    return (1, b"") if v is None else (0, str(v).encode("utf-8"))
+
+
+def _ordenar(df: pd.DataFrame, colunas: list) -> pd.DataFrame:
+    linhas = list(range(len(df)))
+    valores = {c: df[c].tolist() for c in colunas}
+    linhas.sort(key=lambda i: tuple(_chave_ordenacao(valores[c][i]) for c in colunas))
+    return df.iloc[linhas].reset_index(drop=True)
+
+
+def processar_arquivos(
+    caminhos: list,
+    mapa: dict,
+    progresso: Callable[[str], None] | None = None,
+) -> Consolidado:
+    resultados = []
+    for caminho in caminhos:
+        if progresso:
+            progresso(Path(caminho).name)
+        resultados.append(processar_arquivo(caminho, mapa))
+
+    # Adiciona um arquivo por vez para registrar no log uma eventual incompatibilidade.
+    aceitos = []
+    tipos_acumulados = {}
+    for r in resultados:
+        if r.status != "OK":
+            continue
+        problema = _incompatibilidade(tipos_acumulados, r.final)
+        if problema:
+            r.status = "ERRO"
+            r.mensagem = (
+                "Incompatibilidade ao consolidar este arquivo com os anteriores: " + problema
+            )
+            r.final = r.pendencias = None
+            r.n_titulares = r.n_dependentes = None
+            continue
+        for coluna, tipo in _tipos(r.final).items():
+            if tipo:
+                tipos_acumulados.setdefault(coluna, tipo)
+        aceitos.append(r)
+
+    if aceitos:
+        consolidado = _bind_rows([r.final for r in aceitos])
+        pendencias = _bind_rows([r.pendencias for r in aceitos])
+    else:
+        consolidado = pd.DataFrame(columns=COLUNAS_BASE_VAZIA, dtype=object)
+        pendencias = pd.DataFrame(columns=COLUNAS_PENDENCIAS, dtype=object)
+
+    primeiras = [c for c in ORDEM_INICIAL if c in consolidado.columns]
+    consolidado = consolidado[primeiras + [c for c in consolidado.columns if c not in primeiras]]
+    consolidado = _ordenar(consolidado, ["REFERENCIA", "SubF", "NUMERO DO CERTIFICADO"])
+
+    log = pd.DataFrame(
+        [
+            {
+                "ARQUIVO": r.arquivo,
+                "REFERENCIA": r.referencia,
+                "CODIGO_EMPRESA": r.codigo_empresa,
+                "EMPRESA": r.empresa,
+                "STATUS": r.status,
+                "TITULARES": r.n_titulares,
+                "DEPENDENTES": r.n_dependentes,
+                "AVISOS_ESTRUTURA": r.avisos,
+                "DATAS_INVALIDAS": len(r.observacoes_datas),
+                "OBSERVACOES_DATAS": resumir_observacoes_datas(r.observacoes_datas),
+                "QTD_DIVERGENCIAS_DATAS": len(r.divergencias_datas),
+                "DIVERGENCIAS_DATAS": resumir_observacoes_datas(r.divergencias_datas),
+                "MENSAGEM": r.mensagem,
+                "OBSERVACAO_IDENTIFICADORES": OBSERVACAO_IDENTIFICADORES,
+            }
+            for r in resultados
+        ],
+        columns=COLUNAS_LOG,
+        dtype=object,
+    )
+
+    return Consolidado(consolidado=consolidado, pendencias=pendencias, log=log)
