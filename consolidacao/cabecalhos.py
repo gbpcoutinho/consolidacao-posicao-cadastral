@@ -1,5 +1,6 @@
 # Cabecalhos e validacoes de estrutura (secao 2 do TRATAMENTO.R).
 import re
+import unicodedata
 
 import pandas as pd
 
@@ -21,6 +22,15 @@ def normalizar_nome(x) -> str:
     x = x.translate(_TABELA_ACENTOS)
     x = re.sub(r"[^A-Z0-9]+", "_", x)
     return x.strip("_")
+
+
+def chave_locale(texto: str) -> tuple:
+    """Aproxima sort()/split() do R no Windows: letras e digitos decidem
+    primeiro, sem acento nem caixa; espaco e pontuacao so desempatam."""
+    sem_acento = unicodedata.normalize("NFKD", texto)
+    sem_acento = "".join(c for c in sem_acento if not unicodedata.combining(c))
+    principal = re.sub(r"[^0-9a-z]", "", sem_acento.casefold())
+    return principal, sem_acento.casefold(), texto
 
 
 def _preenchido(v) -> bool:

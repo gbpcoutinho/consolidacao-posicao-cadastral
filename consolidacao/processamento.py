@@ -8,7 +8,7 @@ from typing import Callable
 import openpyxl
 import pandas as pd
 
-from .cabecalhos import normalizar_nome, unificar_colunas
+from .cabecalhos import chave_locale, normalizar_nome, unificar_colunas
 from .config import CODIGO_UNICO, NOMES_SAIDA_LEGADOS, ORDEM_INICIAL, nome_saida
 from .datas import resumir_observacoes_datas
 from .empresas import empresa_da_referencia
@@ -273,7 +273,7 @@ def listar_arquivos_entrada(pasta: Path, hoje: date) -> list:
         # Deixa de fora consolidacoes mensais anteriores, mesmo se o nome de saida mudar.
         and not re.match(r"^PC_CONSOLIDADO_.*\.xlsx$", p.name, flags=re.IGNORECASE)
     ]
-    arquivos.sort(key=lambda p: (p.name.casefold(), p.name))
+    arquivos.sort(key=lambda p: chave_locale(p.name))
 
     if not arquivos:
         raise ErroValidacao(f"Nenhum arquivo .xlsx de entrada encontrado em: {pasta}")

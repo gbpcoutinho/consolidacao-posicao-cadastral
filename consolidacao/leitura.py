@@ -9,6 +9,7 @@ from openpyxl.utils.datetime import to_excel
 
 from .cabecalhos import (
     chave_certificado,
+    chave_locale,
     normalizar_nome,
     renomear_e_validar_cabecalhos,
     validar_colunas,
@@ -231,7 +232,7 @@ def agregar_aba_suplementar(df: pd.DataFrame, contexto: str) -> pd.DataFrame:
 
     linhas = []
     # split() do R ordena os grupos pela chave.
-    for chave in sorted(grupos):
+    for chave in sorted(grupos, key=chave_locale):
         g = grupos[chave]
         linhas.append(
             {

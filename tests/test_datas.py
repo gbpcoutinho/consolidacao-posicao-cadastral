@@ -79,3 +79,12 @@ def test_resumir_observacoes():
     assert r.startswith("C | coluna 'D': 6 valor(es); amostras: registro 1 |")
     assert r.endswith("; +2 caso(s)")
     assert resumir_observacoes_datas([]) is None
+
+
+def test_resumir_ordena_grupos_como_locale_do_r():
+    # split() do R usa a collation do Windows: espaco/pontuacao nao decidem.
+    obs = [
+        "C | coluna 'DATA Y2K' | registro 1 | valor invalido 'x' (convertido para vazio)",
+        "C | coluna 'DATA' | registro 2 | valor invalido 'y' (convertido para vazio)",
+    ]
+    assert resumir_observacoes_datas(obs).startswith("C | coluna 'DATA': 1 valor(es)")

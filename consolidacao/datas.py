@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta
 
 import pandas as pd
 
-from .cabecalhos import normalizar_nome
+from .cabecalhos import chave_locale, normalizar_nome
 from .erros import ErroValidacao
 
 # Retorno de converter_data_com_ano_curto quando o texto nao tem ano curto
@@ -242,7 +242,7 @@ def resumir_observacoes_datas(observacoes: list, max_amostras: int = 4):
         chave = re.sub(r" \| registro [0-9]+ \| .*$", "", obs, count=1)
         grupos.setdefault(chave, []).append(obs)
     resumos = []
-    for chave in sorted(grupos):
+    for chave in sorted(grupos, key=chave_locale):
         itens = grupos[chave]
         exemplos = [
             re.sub(r"^.* \| (registro [0-9]+ \| .*)$", r"\1", e)
