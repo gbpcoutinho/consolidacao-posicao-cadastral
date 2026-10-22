@@ -1,5 +1,7 @@
 # Formatacao e exportacao do Excel (secao 8 do TRATAMENTO.R).
 import math
+import os
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
@@ -10,6 +12,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from .config import CODIGO_UNICO, LARGURA_MANUAL
+from .erros import ErroValidacao
 
 COLUNAS_CENTRALIZADAS = [
     "EMPRESA", "SubF", "NUMERO DO CERTIFICADO", CODIGO_UNICO,
@@ -137,4 +140,22 @@ def escrever_excel(c, destino: Path) -> None:
     adicionar_aba_formatada(wb, c.consolidado, "Base Tratada", "TabelaBaseTratada")
     adicionar_aba_formatada(wb, c.pendencias, "Pendencias", "TabelaPendencias")
     adicionar_aba_formatada(wb, c.log, "Log", "TabelaLog")
-    wb.save(Path(destino))
+
+    # Grava num temporario na mesma pasta e so entao troca: se o destino estiver
+    # aberto no Excel, o arquivo anterior fica intacto e o erro e claro.
+    destino = Path(destino)
+    temporario = None
+    try:
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        descritor, nome = tempfile.mkstemp(dir=destino.parent, prefix="~", suffix=".xlsx")
+        os.close(descritor)
+        temporario = Path(nome)
+        wb.save(temporario)
+        os.replace(temporario, destino)
+    except OSError as e:
+        if temporario is not None and temporario.exists():
+            temporario.unlink()
+        raise ErroValidacao(
+            f"Nao foi possivel salvar o arquivo de saida '{destino}': feche o arquivo "
+            f"se estiver aberto no Excel e tente novamente. ({e})"
+        ) from e

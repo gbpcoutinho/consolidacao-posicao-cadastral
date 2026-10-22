@@ -38,7 +38,11 @@ def main(argv: list | None = None) -> int:
     resultado = processar_arquivos(
         arquivos, mapa, progresso=lambda nome: print(f"Processando: {nome} ")
     )
-    escrever_excel(resultado, saida)
+    try:
+        escrever_excel(resultado, saida)
+    except ErroValidacao as e:
+        print(f"Erro: {e}")
+        return 1
 
     log = resultado.log
     arquivos_ok = int((log["STATUS"] == "OK").sum())
