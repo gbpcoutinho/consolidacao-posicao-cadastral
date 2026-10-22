@@ -5,6 +5,7 @@ __pycache__/
 tests/paridade/_trabalho/
 tests/paridade/_sinteticos/
 dados_teste/
+COD_EMPRESAS.csv
 *.xlsx
 .Rhistory
 .Rproj.user/
