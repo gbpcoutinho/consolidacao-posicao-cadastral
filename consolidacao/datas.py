@@ -239,13 +239,14 @@ def resumir_observacoes_datas(observacoes: list, max_amostras: int = 4):
     # completa por aba/coluna e exemplos.
     grupos = {}
     for obs in observacoes:
-        chave = re.sub(r" \| registro [0-9]+ \| .*$", "", obs, count=1)
+        # re.S: no R o "." tambem casa quebra de linha dentro do valor.
+        chave = re.sub(r" \| registro [0-9]+ \| .*$", "", obs, count=1, flags=re.S)
         grupos.setdefault(chave, []).append(obs)
     resumos = []
     for chave in sorted(grupos, key=chave_locale):
         itens = grupos[chave]
         exemplos = [
-            re.sub(r"^.* \| (registro [0-9]+ \| .*)$", r"\1", e)
+            re.sub(r"^.* \| (registro [0-9]+ \| .*)$", r"\1", e, flags=re.S)
             for e in itens[:max_amostras]
         ]
         complemento = (

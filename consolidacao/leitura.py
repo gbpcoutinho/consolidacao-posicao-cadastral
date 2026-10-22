@@ -83,8 +83,15 @@ def _como_texto(v):
     return str(v)
 
 
-def ler_aba(caminho: Path, aba: str, skip: int = 0) -> pd.DataFrame:
-    wb = openpyxl.load_workbook(caminho, read_only=True, data_only=True)
+def abrir_planilha(caminho: Path):
+    """Abre o arquivo uma vez para ler todas as abas (feche com .close())."""
+    return openpyxl.load_workbook(caminho, read_only=True, data_only=True)
+
+
+def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None) -> pd.DataFrame:
+    proprio = wb is None
+    if proprio:
+        wb = abrir_planilha(caminho)
     try:
         ws = wb[aba]
         # O readxl nao usa o <dimension> gravado no arquivo; ele pode estar errado.
@@ -95,7 +102,8 @@ def ler_aba(caminho: Path, aba: str, skip: int = 0) -> pd.DataFrame:
         wb._timedelta_formats = set()
         linhas = [[_valor_bruto(c, wb.epoch) for c in linha] for linha in ws.iter_rows()]
     finally:
-        wb.close()
+        if proprio:
+            wb.close()
 
     linhas = linhas[skip:]
     # Linhas vazias no inicio e no fim sao ignoradas, como no readxl.
@@ -131,9 +139,9 @@ def _adicionar_coluna(df: pd.DataFrame, nome: str, valores) -> None:
     df[nome] = pd.Series(list(valores), index=df.index, dtype=object)
 
 
-def ler_titular(caminho: Path, aba: str, referencia: str) -> ResultadoAba:
+def ler_titular(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
     contexto = f"TITULAR: {referencia}"
-    df = ler_aba(caminho, aba, skip=2)
+    df = ler_aba(caminho, aba, skip=2, wb=wb)
     regras = {
         "REATIVA": "DATA DE REATIVACAO",
         "REGI.O": "REGIAO",
@@ -166,9 +174,9 @@ def ler_titular(caminho: Path, aba: str, referencia: str) -> ResultadoAba:
     )
 
 
-def ler_dependente(caminho: Path, aba: str, referencia: str) -> ResultadoAba:
+def ler_dependente(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
     contexto = f"DEPENDENTE: {referencia}"
-    bruto = ler_aba(caminho, aba, skip=0)
+    bruto = ler_aba(caminho, aba, skip=0, wb=wb)
 
     if len(bruto) <= 2:
         raise ErroValidacao(
@@ -266,9 +274,9 @@ def agregar_aba_suplementar(df: pd.DataFrame, contexto: str) -> pd.DataFrame:
     return pd.DataFrame(linhas, columns=[".CHAVE_CERTIFICADO", ".CARTAO_SUP", ".NOME_MAE_SUP"], dtype=object)
 
 
-def ler_suplementar(caminho: Path, aba: str, referencia: str) -> ResultadoAba:
+def ler_suplementar(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
     contexto = f"POS. CADASTRAL (NOME M E): {referencia}"
-    df = ler_aba(caminho, aba, skip=0)
+    df = ler_aba(caminho, aba, skip=0, wb=wb)
     regras = {"^CART.?O$": "CARTAO", "^NOME_DA_M.?E$": "NOME DA MAE"}
     df = renomear_e_validar_cabecalhos(df, regras, contexto)
     df, observacoes, divergencias = validar_colunas_data(df, contexto)

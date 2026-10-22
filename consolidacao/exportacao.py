@@ -7,12 +7,16 @@ from pathlib import Path
 
 import openpyxl
 import pandas as pd
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from .config import CODIGO_UNICO, LARGURA_MANUAL
 from .erros import ErroValidacao
+
+# O Excel aceita ate 255; textos longos ficam legiveis com quebra a partir daqui.
+LARGURA_AUTO_MAXIMA = 100
 
 COLUNAS_CENTRALIZADAS = [
     "EMPRESA", "SubF", "NUMERO DO CERTIFICADO", CODIGO_UNICO,
@@ -70,10 +74,16 @@ def largura_coluna_data(nome: str) -> float:
 
 
 def _coluna_de_datas(nome: str, valores: list) -> bool:
-    # No R, o estilo de data vale para colunas com DATA no nome e classe Date.
-    return "DATA" in nome.upper() and any(isinstance(v, date) for v in valores) and all(
-        v is None or isinstance(v, date) for v in valores
-    )
+    # No R, o estilo de data vale para colunas com DATA no nome e classe Date,
+    # mesmo vazias. Vazia sem tipo: conta como data se o nome comeca com DATA.
+    if "DATA" not in nome.upper() or not all(v is None or isinstance(v, date) for v in valores):
+        return False
+    return any(isinstance(v, date) for v in valores) or nome.upper().startswith("DATA")
+
+
+def _celula(v):
+    # openpyxl recusa caracteres de controle; o Excel tambem nao os aceita.
+    return ILLEGAL_CHARACTERS_RE.sub("", v) if isinstance(v, str) else v
 
 
 def adicionar_aba_formatada(wb, df: pd.DataFrame, nome_aba: str, nome_tabela: str) -> None:
@@ -89,7 +99,7 @@ def adicionar_aba_formatada(wb, df: pd.DataFrame, nome_aba: str, nome_tabela: st
     # Em todas as abas, os cabecalhos ficam na linha 1 e os dados comecam na 2.
     ws.append(colunas)
     for i in range(n_linhas):
-        ws.append([valores[c][i] for c in df.columns])
+        ws.append([_celula(valores[c][i]) for c in df.columns])
 
     ultima = get_column_letter(n_colunas)
     if n_linhas > 0:
@@ -104,7 +114,10 @@ def adicionar_aba_formatada(wb, df: pd.DataFrame, nome_aba: str, nome_tabela: st
             setattr(celula, atributo, estilo)
 
     for j, nome in enumerate(colunas, start=1):
-        largura = max(len(_texto_exibido(v)) for v in [nome, *valores[df.columns[j - 1]]]) + 2
+        largura = min(
+            LARGURA_AUTO_MAXIMA,
+            max(len(_texto_exibido(v)) for v in [nome, *valores[df.columns[j - 1]]]) + 2,
+        )
         if nome in LARGURA_MANUAL:
             largura = LARGURA_MANUAL[nome]
         # A mascara dd/mm/yyyy precisa de largura minima para nao aparecer como ####.

@@ -136,6 +136,78 @@ def test_c1_cli_usa_data_injetada_no_nome_padrao(tmp_path):
     assert (tmp_path / "PC_CONSOLIDADO_1_2027.xlsx").exists()
 
 
+def _excel_de(tmp_path, df, nome="Base Tratada"):
+    import pandas as pd
+
+    from consolidacao.exportacao import escrever_excel
+    from consolidacao.processamento import Consolidado
+
+    vazio = pd.DataFrame({"X": pd.Series([], dtype=object)})
+    c = Consolidado(consolidado=df, pendencias=vazio, log=vazio)
+    destino = tmp_path / "o.xlsx"
+    escrever_excel(c, destino)
+    return openpyxl.load_workbook(destino)[nome]
+
+
+def test_b2_caractere_de_controle_nao_quebra_exportacao(tmp_path):
+    import pandas as pd
+
+    ws = _excel_de(tmp_path, pd.DataFrame({"NOME": ["a\x0bb"]}, dtype=object))
+    assert ws["A2"].value == "ab"
+
+
+def test_b5_largura_automatica_tem_teto(tmp_path):
+    import pandas as pd
+
+    ws = _excel_de(tmp_path, pd.DataFrame({"TEXTO": ["x" * 300]}, dtype=object))
+    assert ws.column_dimensions["A"].width == 100
+
+
+def test_a4_coluna_de_data_vazia_recebe_formato_de_data(tmp_path):
+    import pandas as pd
+
+    df = pd.DataFrame({"NOME": ["a"], "DATA DE REATIVACAO": [None]}, dtype=object)
+    ws = _excel_de(tmp_path, df)
+    assert ws["B2"].number_format == "dd/mm/yyyy"
+    assert ws["B2"].alignment.horizontal == "center"
+
+
+def test_a3_observacao_com_quebra_de_linha_agrupa():
+    from consolidacao.datas import resumir_observacoes_datas
+
+    obs = ["C | coluna 'D' | registro 1 | valor invalido 'a\nb' (convertido para vazio)"]
+    assert resumir_observacoes_datas(obs) == (
+        "C | coluna 'D': 1 valor(es); amostras: registro 1 | valor invalido 'a\nb' (convertido para vazio)"
+    )
+
+
+def test_b3_cada_arquivo_e_aberto_uma_vez(tmp_path, monkeypatch):
+    import consolidacao.leitura as leitura
+    import consolidacao.processamento as processamento
+
+    chamadas = []
+    original = openpyxl.load_workbook
+
+    def contar(*args, **kwargs):
+        chamadas.append(args[0])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(leitura.openpyxl, "load_workbook", contar)
+    monkeypatch.setattr(processamento.openpyxl, "load_workbook", contar)
+    processamento.processar_arquivos(_dois_arquivos(tmp_path)[:1], {"123": "A"})
+    assert len(chamadas) == 1
+
+
+def test_c6_cli_retorna_0_mesmo_com_todos_os_arquivos_em_erro(tmp_path):
+    from tests.fabrica import escrever_csv_empresas
+    from tratamento import main
+
+    _dois_arquivos(tmp_path)
+    escrever_csv_empresas(tmp_path / "e.csv", [("OUTRA", "999")])
+    # Como no R: o processamento termina e os erros ficam no Log.
+    assert main(["--entrada", str(tmp_path), "--empresas", str(tmp_path / "e.csv")]) == 0
+
+
 def test_a2_duracao_em_coluna_de_texto_vira_numero(tmp_path):
     p = tmp_path / "x.xlsx"
     _planilha_formatada(p, ["HORAS"], [1.5], "[h]:mm:ss")
