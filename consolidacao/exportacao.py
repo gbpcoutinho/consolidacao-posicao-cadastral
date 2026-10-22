@@ -1,4 +1,5 @@
 # Formatacao e exportacao do Excel (secao 8 do TRATAMENTO.R).
+import math
 from datetime import date, datetime
 from pathlib import Path
 
@@ -35,6 +36,34 @@ def _texto_exibido(v) -> str:
     if isinstance(v, (date, datetime)):
         return "00/00/0000"
     return str(v)
+
+
+def _linhas_quebradas(texto: str, largura: int) -> int:
+    """Quantas linhas o texto ocupa com quebra por palavra (palavra longa e cortada)."""
+    linhas, atual = 0, 0
+    for palavra in texto.split():
+        while len(palavra) > largura:
+            if atual:
+                linhas, atual = linhas + 1, 0
+            linhas += 1
+            palavra = palavra[largura:]
+        if atual and atual + 1 + len(palavra) <= largura:
+            atual += 1 + len(palavra)
+        else:
+            if atual:
+                linhas += 1
+            atual = len(palavra)
+    return linhas + (1 if atual else 0)
+
+
+def largura_coluna_data(nome: str) -> float:
+    # Pedido do usuario (diferente do R, que fixa 13): a coluna de data fica
+    # larga o bastante para o cabecalho caber em ate 2 linhas.
+    caracteres = 1
+    while _linhas_quebradas(nome, caracteres) > 2:
+        caracteres += 1
+    # Maiusculas em negrito ocupam ~25% a mais que a unidade de largura do Excel.
+    return max(13, math.ceil(caracteres * 1.25 + 2))
 
 
 def _coluna_de_datas(nome: str, valores: list) -> bool:
@@ -77,7 +106,7 @@ def adicionar_aba_formatada(wb, df: pd.DataFrame, nome_aba: str, nome_tabela: st
             largura = LARGURA_MANUAL[nome]
         # A mascara dd/mm/yyyy precisa de largura minima para nao aparecer como ####.
         if "DATA" in nome.upper():
-            largura = 13
+            largura = largura_coluna_data(nome)
         ws.column_dimensions[get_column_letter(j)].width = largura
 
     ws.row_dimensions[1].height = 32

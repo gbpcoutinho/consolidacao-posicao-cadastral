@@ -86,6 +86,13 @@ Além disso, um resumo é impresso no console.
   mesmo código sem alterá-lo.
 - Arquivos: `tratamento.py`, `tests/` e `requirements.txt` na raiz do projeto.
 
+## Diferenças intencionais em relação ao R
+
+- `COD_EMPRESAS.csv` salvo em ANSI (cp1252) é lido sem corromper acentos.
+- Largura das colunas com `DATA` no nome: o R fixa 13. O Python usa a
+  largura necessária para o cabeçalho caber em até 2 linhas, com mínimo de 13
+  (pedido do usuário em 2026-10-22).
+
 ## Testes
 
 1. **Testes automáticos com planilhas sintéticas** (dados falsos, gerados pelos

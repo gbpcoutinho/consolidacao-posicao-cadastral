@@ -22,13 +22,24 @@ def test_excel_formatado(tmp_path):
     assert ws.sheet_view.showGridLines is False
     col = {c.value: c.column_letter for c in ws[1]}
     assert ws.column_dimensions[col["EMPRESA"]].width == 28
-    assert ws.column_dimensions[col["DATA DE NASCIMENTO"]].width == 13
+    assert ws.column_dimensions[col["DATA DE NASCIMENTO"]].width == 15
     celula = ws[f'{col["DATA DE NASCIMENTO"]}2']
     assert celula.number_format == "dd/mm/yyyy" and isinstance(celula.value, datetime)
     assert ws[f'{col["CODIGO DO DEPENDENTE"]}2'].alignment.horizontal == "right"
     assert ws[f'{col["PLANO"]}2'].alignment.horizontal == "center"
     log = wb["Log"]
     assert [c.value for c in log[1]][:3] == ["ARQUIVO", "REFERENCIA", "CODIGO_EMPRESA"]
+
+
+def test_largura_de_data_cabe_o_cabecalho_em_duas_linhas():
+    from consolidacao.exportacao import largura_coluna_data
+
+    # "DATA DE INICIO" / "DE VIGENCIA Y2K": a linha mais longa tem 15 caracteres.
+    assert 20 <= largura_coluna_data("DATA DE INICIO DE VIGENCIA Y2K") <= 22
+    # "DATA DE" / "NASCIMENTO": 10 caracteres.
+    assert 13 <= largura_coluna_data("DATA DE NASCIMENTO") <= 15
+    # Cabecalhos curtos mantem o minimo de 13 do R.
+    assert largura_coluna_data("DATA") == 13
 
 
 def test_excel_pendencias_vazias_sem_tabela(tmp_path):

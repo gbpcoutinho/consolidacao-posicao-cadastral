@@ -23,16 +23,18 @@ RSCRIPT_PADRAO = Path(r"C:\Program Files\R\R-4.6.1\bin\Rscript.exe")
 TRABALHO = Path(__file__).resolve().parent / "_trabalho"
 
 
-def rodar(entrada: Path, empresas: Path, rscript: Path = RSCRIPT_PADRAO) -> list:
+def rodar(
+    entrada: Path, empresas: Path, rscript: Path = RSCRIPT_PADRAO, trabalho: Path = TRABALHO
+) -> list:
     entrada, empresas = Path(entrada).resolve(), Path(empresas).resolve()
     hoje = date.today()
 
     # O OneDrive pode travar pastas recem-esvaziadas; cada execucao usa uma
-    # pasta nova e as antigas sao removidas quando possivel.
-    if TRABALHO.exists():
-        for antiga in TRABALHO.iterdir():
+    # pasta nova e as execucoes antigas sao removidas quando possivel.
+    if trabalho.exists():
+        for antiga in trabalho.glob("execucao_*"):
             shutil.rmtree(antiga, ignore_errors=True)
-    execucao = TRABALHO / datetime.now().strftime("execucao_%Y%m%d_%H%M%S_%f")
+    execucao = trabalho / datetime.now().strftime("execucao_%Y%m%d_%H%M%S_%f")
     r_raiz = execucao / "r_raiz"
     pasta_r = pasta_padrao(r_raiz, hoje)
     pasta_r.mkdir(parents=True)
