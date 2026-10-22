@@ -12,7 +12,7 @@ from .cabecalhos import chave_locale, normalizar_nome, trimws, unificar_colunas
 from .config import CODIGO_UNICO, NOMES_SAIDA_LEGADOS, ORDEM_INICIAL, nome_saida
 from .datas import resumir_observacoes_datas
 from .empresas import empresa_da_referencia
-from .erros import ErroValidacao
+from .erros import ErroValidacao, ProcessamentoCancelado
 from .leitura import ler_dependente, ler_suplementar, ler_titular
 
 COLUNAS_PENDENCIAS = [
@@ -316,12 +316,19 @@ def _ordenar(df: pd.DataFrame, colunas: list) -> pd.DataFrame:
 def processar_arquivos(
     caminhos: list,
     mapa: dict,
-    progresso: Callable[[str], None] | None = None,
+    progresso: Callable[[int, int, str], None] | None = None,
+    cancelar: Callable[[], bool] | None = None,
 ) -> Consolidado:
+    """progresso(i, total, nome) e chamado antes de cada arquivo (i comeca em 1).
+    cancelar() e consultado antes de cada arquivo; True interrompe com
+    ProcessamentoCancelado."""
     resultados = []
-    for caminho in caminhos:
+    total = len(caminhos)
+    for i, caminho in enumerate(caminhos, start=1):
+        if cancelar and cancelar():
+            raise ProcessamentoCancelado("Processamento cancelado pelo usuario.")
         if progresso:
-            progresso(Path(caminho).name)
+            progresso(i, total, Path(caminho).name)
         resultados.append(processar_arquivo(caminho, mapa))
 
     # Adiciona um arquivo por vez para registrar no log uma eventual incompatibilidade.

@@ -79,6 +79,63 @@ def test_x1_cli_retorna_1_quando_nao_salva(tmp_path, capsys):
     assert "Erro: Nao foi possivel salvar o arquivo de saida" in capsys.readouterr().out
 
 
+def _dois_arquivos(tmp_path):
+    from tests.fabrica import DEPENDENTE_OK, SUPLEMENTAR_OK, TITULAR_OK, criar_arquivo_pc
+
+    arquivos = [tmp_path / "PC123 a.xlsx", tmp_path / "PC123 b.xlsx"]
+    for a in arquivos:
+        criar_arquivo_pc(a, TITULAR_OK, DEPENDENTE_OK, SUPLEMENTAR_OK)
+    return arquivos
+
+
+def test_x2_progresso_recebe_indice_total_e_nome(tmp_path):
+    from consolidacao.processamento import processar_arquivos
+
+    vistos = []
+    processar_arquivos(_dois_arquivos(tmp_path), {"123": "A"},
+                       progresso=lambda i, total, nome: vistos.append((i, total, nome)))
+    assert vistos == [(1, 2, "PC123 a.xlsx"), (2, 2, "PC123 b.xlsx")]
+
+
+def test_x2_cancelar_interrompe_antes_do_proximo_arquivo(tmp_path):
+    import pytest
+
+    from consolidacao.erros import ProcessamentoCancelado
+    from consolidacao.processamento import processar_arquivos
+
+    vistos = []
+    with pytest.raises(ProcessamentoCancelado):
+        processar_arquivos(_dois_arquivos(tmp_path), {"123": "A"},
+                           progresso=lambda i, total, nome: vistos.append(i),
+                           cancelar=lambda: len(vistos) >= 1)
+    assert vistos == [1]
+
+
+def test_c1_executar_processa_grava_e_resume(tmp_path):
+    from consolidacao.pipeline import executar, resumir
+
+    saida = tmp_path / "out" / "r.xlsx"
+    c = executar(_dois_arquivos(tmp_path), {"123": "A"}, saida)
+    assert saida.exists()
+    assert resumir(c) == {
+        "arquivos_ok": 2, "arquivos_erro": 0, "registros": 8, "pendencias": 2,
+        "datas_invalidas": 0, "divergencias_datas": 0, "erros": [],
+    }
+
+
+def test_c1_cli_usa_data_injetada_no_nome_padrao(tmp_path):
+    from datetime import date
+
+    from tests.fabrica import escrever_csv_empresas
+    from tratamento import main
+
+    _dois_arquivos(tmp_path)
+    escrever_csv_empresas(tmp_path / "e.csv", [("ACME", "123")])
+    assert main(["--entrada", str(tmp_path), "--empresas", str(tmp_path / "e.csv")],
+                hoje=date(2027, 1, 5)) == 0
+    assert (tmp_path / "PC_CONSOLIDADO_1_2027.xlsx").exists()
+
+
 def test_a2_duracao_em_coluna_de_texto_vira_numero(tmp_path):
     p = tmp_path / "x.xlsx"
     _planilha_formatada(p, ["HORAS"], [1.5], "[h]:mm:ss")

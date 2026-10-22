@@ -31,7 +31,8 @@ def test_processar_arquivos_mistura_ok_e_erro(tmp_path):
     b = tmp_path / "PC999 y.xlsx"
     criar_arquivo_pc(b, TITULAR_OK, DEPENDENTE_OK, SUPLEMENTAR_OK)
     vistos = []
-    c = processar_arquivos([a, b], {"123": "ACME"}, progresso=vistos.append)
+    c = processar_arquivos([a, b], {"123": "ACME"},
+                           progresso=lambda i, total, nome: vistos.append(nome))
     assert vistos == ["PC123 x.xlsx", "PC999 y.xlsx"]
     assert c.log["STATUS"].tolist() == ["OK", "ERRO"]
     assert list(c.log.columns) == [
