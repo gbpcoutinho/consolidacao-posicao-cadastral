@@ -1,0 +1,80 @@
+# Equivalente ao CFG do TRATAMENTO.R (secao 1).
+from datetime import date
+from pathlib import Path
+
+CODIGO_UNICO = "CÓDIGO UNICO"
+
+NOMES_SAIDA_LEGADOS = [
+    "Consolidado - tratado.xlsx",
+    "Consolidado - pendencias.xlsx",
+    "Consolidado - log de processamento.xlsx",
+]
+
+ORDEM_INICIAL = [
+    "REFERENCIA", "EMPRESA", "SubF", "NUMERO DO CERTIFICADO",
+    CODIGO_UNICO, "TITULARIDADE", "CODIGO DO DEPENDENTE", "NOME DO SEGURADO",
+    "NOME DEPENDENTE", "NOME DA MAE", "NUMERO DO CARTAO", "GRAU PARENTESCO", "PLANO",
+]
+
+COLUNAS_OBRIGATORIAS_TITULAR = [
+    "NUMERO DO CERTIFICADO", "NUMERO DA SUBFATURA", "NOME DO SEGURADO", "PLANO",
+]
+
+COLUNAS_OBRIGATORIAS_DEPENDENTE = [
+    "NUMERO DO CERTIFICADO", "NOME DEPENDENTE",
+    "CODIGO DO DEPENDENTE", "GRAU PARENTESCO",
+    "NOME DA MAE DO DEPENDENTE", "NUMERO DO CARTAO DO DEPENDENTE",
+]
+
+COLUNAS_OBRIGATORIAS_SUPLEMENTAR = ["NUMERO DO CERTIFICADO", "CARTAO", "NOME DA MAE"]
+
+COLUNAS_OPCIONAIS_TITULAR = [
+    "DATA DE REATIVACAO", "REGIAO", "CARGO DE OCUPACAO",
+    "SEXO", "NUMERO DO CPF", "NUMERO DA MATRICULA",
+]
+
+COLUNAS_OPCIONAIS_DEPENDENTE = [
+    "DATA DE REATIVACAO", "SEXO", "ESTADO CIVIL", "NUMERO DA SUBFATURA",
+]
+
+# No R, "NOME DA MAE" aparece duas vezes com o mesmo valor; o dict mantem uma.
+LARGURA_MANUAL = {
+    "REFERENCIA": 18,
+    "EMPRESA": 28,
+    "TITULARIDADE": 18,
+    "SubF": 11,
+    "NUMERO DO CERTIFICADO": 22,
+    CODIGO_UNICO: 26,
+    "NOME DO SEGURADO": 44,
+    "NUMERO DO CARTAO": 22,
+    "NOME DA MAE": 34,
+    "NOME DEPENDENTE": 40,
+    "CARGO DE OCUPACAO": 28,
+    "AVISOS_ESTRUTURA": 60,
+    "OBSERVACOES_DATAS": 60,
+    "DATAS_INVALIDAS": 14,
+    "DIVERGENCIAS_DATAS": 60,
+    "QTD_DIVERGENCIAS_DATAS": 18,
+    "MENSAGEM": 60,
+    "SEXO": 11,
+    "PLANO": 11,
+    "NUMERO DO CPF": 19,
+    "DATA DE INICIO DE VIGENCIA Y2K": 20,
+    "REGIAO": 11,
+    "DATA DE CANCELAMENTO Y2K": 20,
+    "DATA DE INICIO DE VIGENCIA": 20,
+    "DATA DE NASCIMENTO": 16,
+    "DATA DE NASCIMENTO Y2K": 20,
+    "DATA DE ADMISSAO": 16,
+}
+
+PADRAO_IDENTIFICADOR = "NUMERO|CODIGO|CARTAO|CERTIFICADO|SUBFATURA|CPF|MATRICULA|INSCRICAO"
+
+
+def nome_saida(hoje: date) -> str:
+    # month() do lubridate nao usa zero a esquerda.
+    return f"PC_CONSOLIDADO_{hoje.month}_{hoje.year}.xlsx"
+
+
+def pasta_padrao(raiz: Path, hoje: date) -> Path:
+    return Path(raiz) / f"PC_CONSOLIDADO_{hoje.month}_{hoje.year}"
