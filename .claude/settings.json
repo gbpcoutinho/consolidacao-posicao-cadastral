@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./ignore)",
+      "Read(./ignore/**)",
+      "Edit(./ignore)",
+      "Edit(./ignore/**)",
+      "Bash(*ignore*)",
+      "PowerShell(*ignore*)"
+    ]
+  }
+}

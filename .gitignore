@@ -1,0 +1,11 @@
+ignore/
+.venv/
+.pytest_tmp/
+__pycache__/
+tests/paridade/_trabalho/
+tests/paridade/_sinteticos/
+dados_teste/
+*.xlsx
+.Rhistory
+.Rproj.user/
+.superpowers/
