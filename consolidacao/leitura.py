@@ -5,7 +5,8 @@ from pathlib import Path
 
 import openpyxl
 import pandas as pd
-from openpyxl.utils.datetime import to_excel
+from openpyxl.styles.numbers import is_date_format
+from openpyxl.utils.datetime import from_excel, to_excel
 
 from .cabecalhos import (
     chave_certificado,
@@ -40,11 +41,18 @@ class ResultadoAba:
 _PRESENTE_NA = object()
 
 
-def _valor_bruto(celula):
+def _valor_bruto(celula, epoch):
     # Celulas com erro do Excel (#N/A etc.) sao NA no readxl.
     if getattr(celula, "data_type", None) == "e":
         return _PRESENTE_NA
     v = celula.value
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and is_date_format(celula.number_format):
+        # Numero fora da faixa de datas (ex.: CPF em celula com formato de data)
+        # fica como numero, como no readxl, em vez de virar erro.
+        try:
+            return from_excel(v, epoch)
+        except (ValueError, OverflowError):
+            return v
     if isinstance(v, str):
         # readxl: trim_ws = TRUE (so espaco e tab) e na = "".
         v = v.strip(" \t")
@@ -81,7 +89,11 @@ def ler_aba(caminho: Path, aba: str, skip: int = 0) -> pd.DataFrame:
         ws = wb[aba]
         # O readxl nao usa o <dimension> gravado no arquivo; ele pode estar errado.
         ws.reset_dimensions()
-        linhas = [[_valor_bruto(c) for c in linha] for linha in ws.iter_rows()]
+        # A conversao de datas e duracoes e feita em _valor_bruto: a do openpyxl
+        # transforma numeros fora da faixa em erro e duracoes em timedelta.
+        wb._date_formats = set()
+        wb._timedelta_formats = set()
+        linhas = [[_valor_bruto(c, wb.epoch) for c in linha] for linha in ws.iter_rows()]
     finally:
         wb.close()
 
