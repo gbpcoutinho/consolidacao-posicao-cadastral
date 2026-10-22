@@ -12,6 +12,7 @@ from .cabecalhos import (
     chave_locale,
     normalizar_nome,
     renomear_e_validar_cabecalhos,
+    trimws,
     validar_colunas,
     validar_identificadores_como_texto,
 )
@@ -34,16 +35,25 @@ class ResultadoAba:
     divergencias_datas: list = field(default_factory=list)
 
 
+# Celula que existe na planilha mas e NA (erro do Excel, texto vazio ou so
+# espaco). Conta para a faixa lida, como no readxl, e depois vira None.
+_PRESENTE_NA = object()
+
+
 def _valor_bruto(celula):
     # Celulas com erro do Excel (#N/A etc.) sao NA no readxl.
     if getattr(celula, "data_type", None) == "e":
-        return None
+        return _PRESENTE_NA
     v = celula.value
     if isinstance(v, str):
-        # readxl: trim_ws = TRUE e na = "".
-        v = v.strip()
-        return v if v != "" else None
+        # readxl: trim_ws = TRUE (so espaco e tab) e na = "".
+        v = v.strip(" \t")
+        return v if v != "" else _PRESENTE_NA
     return v
+
+
+def _sem_marcador(v):
+    return None if v is _PRESENTE_NA else v
 
 
 def _numero_como_texto(x) -> str:
@@ -68,10 +78,10 @@ def _como_texto(v):
 def ler_aba(caminho: Path, aba: str, skip: int = 0) -> pd.DataFrame:
     wb = openpyxl.load_workbook(caminho, read_only=True, data_only=True)
     try:
-        linhas = [
-            [_valor_bruto(c) for c in linha]
-            for linha in wb[aba].iter_rows()
-        ]
+        ws = wb[aba]
+        # O readxl nao usa o <dimension> gravado no arquivo; ele pode estar errado.
+        ws.reset_dimensions()
+        linhas = [[_valor_bruto(c) for c in linha] for linha in ws.iter_rows()]
     finally:
         wb.close()
 
@@ -86,7 +96,7 @@ def ler_aba(caminho: Path, aba: str, skip: int = 0) -> pd.DataFrame:
         j for l in linhas for j, v in enumerate(l) if v is not None
     ]
     inicio, fim = min(colunas_usadas), max(colunas_usadas) + 1
-    linhas = [(l + [None] * fim)[inicio:fim] for l in linhas]
+    linhas = [[_sem_marcador(v) for v in (l + [None] * fim)[inicio:fim]] for l in linhas]
 
     cabecalho = ["" if v is None else _como_texto(v) for v in linhas[0]]
     colunas = {}
@@ -195,7 +205,7 @@ def ler_dependente(caminho: Path, aba: str, referencia: str) -> ResultadoAba:
 def linhas_vazias(df: pd.DataFrame) -> list:
     def vazia(v):
         txt = texto_celula(v)
-        return txt is None or txt.strip() == ""
+        return txt is None or trimws(txt) == ""
 
     return [all(vazia(v) for v in linha) for linha in df.itertuples(index=False)]
 
@@ -221,8 +231,8 @@ def agregar_aba_suplementar(df: pd.DataFrame, contexto: str) -> pd.DataFrame:
 
     def valor_unico(chave, nome_coluna, valores):
         valores = [None if v is None else texto_celula(v) for v in valores]
-        preenchidos = [v for v in valores if v is not None and v.strip() != ""]
-        distintos = list(dict.fromkeys(v.strip() for v in preenchidos))
+        preenchidos = [v for v in valores if v is not None and trimws(v) != ""]
+        distintos = list(dict.fromkeys(trimws(v) for v in preenchidos))
         if len(distintos) > 1:
             raise ErroValidacao(
                 f"[{contexto}] O certificado '{chave}' tem valores conflitantes em "

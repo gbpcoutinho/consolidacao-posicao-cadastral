@@ -2,12 +2,15 @@
 from datetime import datetime
 from pathlib import Path
 
+import openpyxl
+
 from tests.fabrica import (
     DEPENDENTE_OK,
     SUPLEMENTAR_OK,
     TITULAR_OK,
     criar_arquivo_pc,
     escrever_csv_empresas,
+    forcar_dimensao,
 )
 
 
@@ -67,4 +70,17 @@ def gerar(pasta: Path) -> Path:
         pasta / "PC123 LINHAS FORMATADAS.xlsx", TITULAR_OK, DEPENDENTE_OK, SUPLEMENTAR_OK,
         linhas_vazias_formatadas_no_fim=5,
     )
+
+    # Achados da revisao final: <dimension> errado, NBSP e celula so com espaco.
+    criar_arquivo_pc(pasta / "PC123 DIMENSAO.xlsx", TITULAR_OK, DEPENDENTE_OK, SUPLEMENTAR_OK)
+    forcar_dimensao(pasta / "PC123 DIMENSAO.xlsx", 2, "A1")
+    dependentes_espacos = [
+        _com(DEPENDENTE_OK[0], **{"NUMERO DO CERTIFICADO": "001\xa0"}),
+        DEPENDENTE_OK[1],
+    ]
+    p = pasta / "PC456 ESPACOS.xlsx"
+    criar_arquivo_pc(p, TITULAR_OK, dependentes_espacos, SUPLEMENTAR_OK)
+    wb = openpyxl.load_workbook(p)
+    wb["DEPENDENTE"].append([" "])
+    wb.save(p)
     return pasta

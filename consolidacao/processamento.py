@@ -8,7 +8,7 @@ from typing import Callable
 import openpyxl
 import pandas as pd
 
-from .cabecalhos import chave_locale, normalizar_nome, unificar_colunas
+from .cabecalhos import chave_locale, normalizar_nome, trimws, unificar_colunas
 from .config import CODIGO_UNICO, NOMES_SAIDA_LEGADOS, ORDEM_INICIAL, nome_saida
 from .datas import resumir_observacoes_datas
 from .empresas import empresa_da_referencia
@@ -50,7 +50,7 @@ def _bind_rows(dfs: list) -> pd.DataFrame:
 
 
 def _preenchido(v) -> bool:
-    return v is not None and str(v).strip() != ""
+    return v is not None and trimws(str(v)) != ""
 
 
 def _coluna(df: pd.DataFrame, nome: str, valores) -> None:

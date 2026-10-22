@@ -1,4 +1,7 @@
 """Gera arquivos sinteticos (dados falsos) para os testes."""
+import re
+import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -65,6 +68,20 @@ def escrever_csv_empresas(caminho: Path, linhas: list, encoding: str = "utf-8-si
         f"{empresa};{codigo};\n" for empresa, codigo in linhas
     )
     Path(caminho).write_bytes(texto.encode(encoding))
+
+
+def forcar_dimensao(caminho: Path, indice_aba: int, ref: str) -> None:
+    """Regrava o <dimension> de uma aba, como fazem alguns geradores de xlsx."""
+    caminho = Path(caminho)
+    temporario = caminho.with_suffix(".tmp")
+    nome_xml = f"xl/worksheets/sheet{indice_aba}.xml"
+    with zipfile.ZipFile(caminho) as origem, zipfile.ZipFile(temporario, "w") as destino:
+        for item in origem.infolist():
+            dados = origem.read(item.filename)
+            if item.filename == nome_xml:
+                dados = re.sub(rb'<dimension ref="[^"]*"', f'<dimension ref="{ref}"'.encode(), dados)
+            destino.writestr(item, dados)
+    shutil.move(temporario, caminho)
 
 
 def _colunas(registros: list, padrao: list) -> list:

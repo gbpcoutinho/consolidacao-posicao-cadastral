@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta
 
 import pandas as pd
 
-from .cabecalhos import chave_locale, normalizar_nome
+from .cabecalhos import chave_locale, normalizar_nome, trimws
 from .erros import ErroValidacao
 
 # Retorno de converter_data_com_ano_curto quando o texto nao tem ano curto
@@ -154,7 +154,7 @@ def converter_celula_data(v, nome_coluna: str, linha: int, contexto: str):
             return data_serial, None
         valor_original = texto_celula(v)
     else:
-        valor_original = texto_celula(v).strip()
+        valor_original = trimws(texto_celula(v))
         if valor_original == "":
             return None, None
 

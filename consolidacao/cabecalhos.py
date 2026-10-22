@@ -15,10 +15,15 @@ _TABELA_ACENTOS = str.maketrans(
 )
 
 
+def trimws(texto: str) -> str:
+    """trimws() do R: remove apenas espaco, tab, CR e LF das pontas."""
+    return texto.strip(" \t\r\n")
+
+
 def normalizar_nome(x) -> str:
     if x is None:
         return ""
-    x = str(x).upper().strip()
+    x = trimws(str(x)).upper()
     x = x.translate(_TABELA_ACENTOS)
     x = re.sub(r"[^A-Z0-9]+", "_", x)
     return x.strip("_")
@@ -34,7 +39,7 @@ def chave_locale(texto: str) -> tuple:
 
 
 def _preenchido(v) -> bool:
-    return v is not None and str(v).strip() != ""
+    return v is not None and trimws(str(v)) != ""
 
 
 def renomear_e_validar_cabecalhos(df: pd.DataFrame, regras: dict, contexto: str) -> pd.DataFrame:
@@ -50,7 +55,7 @@ def renomear_e_validar_cabecalhos(df: pd.DataFrame, regras: dict, contexto: str)
     if any(n == "" for n in nomes_norm):
         raise ErroValidacao(f"[{contexto}] Existe coluna sem nome; layout nao seguro.")
 
-    nomes_finais = [re.sub(r"_+", " ", n).strip() for n in nomes_norm]
+    nomes_finais = [trimws(re.sub(r"_+", " ", n)) for n in nomes_norm]
 
     for padrao, destino in regras.items():
         idx = [i for i, n in enumerate(nomes_norm) if re.search(padrao, n)]
@@ -109,7 +114,7 @@ def chave_certificado(valores: pd.Series) -> pd.Series:
     def chave(v):
         if v is None:
             return None
-        v = str(v).strip()
+        v = trimws(str(v))
         return v if v != "" else None
 
     return pd.Series([chave(v) for v in valores.tolist()], index=valores.index, dtype=object)
@@ -129,7 +134,7 @@ def unificar_colunas(df: pd.DataFrame, nome_final: str, fontes: list, contexto: 
             if not _preenchido(v):
                 continue
             if _preenchido(finais[i]):
-                if finais[i].strip() != v.strip():
+                if trimws(finais[i]) != trimws(v):
                     raise ErroValidacao(
                         f"[{contexto}] Valores conflitantes nas colunas equivalentes "
                         f"usadas para '{nome_final}' (registro {i + 1})."

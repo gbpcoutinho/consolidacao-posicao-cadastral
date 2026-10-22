@@ -4,7 +4,7 @@ import io
 import re
 from pathlib import Path
 
-from .cabecalhos import normalizar_nome
+from .cabecalhos import normalizar_nome, trimws
 from .erros import ErroValidacao
 
 
@@ -36,7 +36,7 @@ def carregar_mapa_empresas(caminho: Path) -> dict:
     def campo(registro, i):
         valor = registro[i] if i < len(registro) else ""
         # read.csv2 trata o texto "NA" como ausente.
-        return None if valor == "NA" else valor.strip()
+        return None if valor == "NA" else trimws(valor)
 
     pares = []
     for registro in registros[1:]:
