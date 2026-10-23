@@ -176,19 +176,27 @@ def escrever_excel(c, destino: Path) -> None:
 
     # Grava num temporario na mesma pasta e so entao troca: se o destino estiver
     # aberto no Excel, o arquivo anterior fica intacto e o erro e claro.
+    # Prefixo "~$": se o temporario sobrar (processo morto), a listagem de
+    # entradas do R e do Python ja o ignora, como os arquivos de bloqueio do Excel.
     destino = Path(destino)
     temporario = None
     try:
         destino.parent.mkdir(parents=True, exist_ok=True)
-        descritor, nome = tempfile.mkstemp(dir=destino.parent, prefix="~", suffix=".xlsx")
+        descritor, nome = tempfile.mkstemp(dir=destino.parent, prefix="~$", suffix=".xlsx")
         os.close(descritor)
         temporario = Path(nome)
         wb.save(temporario)
         os.replace(temporario, destino)
+        temporario = None
     except OSError as e:
-        if temporario is not None and temporario.exists():
-            temporario.unlink()
         raise ErroValidacao(
             f"Nao foi possivel salvar o arquivo de saida '{destino}': feche o arquivo "
             f"se estiver aberto no Excel e tente novamente. ({e})"
         ) from e
+    finally:
+        # Qualquer falha (inclusive fora de OSError) nao deixa o temporario na pasta.
+        if temporario is not None:
+            try:
+                temporario.unlink(missing_ok=True)
+            except OSError:
+                pass  # nao esconde o erro original

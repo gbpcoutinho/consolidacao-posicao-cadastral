@@ -122,3 +122,99 @@ def test_c5_aba_no_limite_exato_e_aceita():
 
     no_limite = pd.DataFrame({"X": pd.Series([None] * 1_048_575, dtype=object)})
     validar_limite_linhas(_consolidado(no_limite))
+
+
+# C6 ------------------------------------------------------------------------
+
+def test_c6_temporario_comeca_com_til_cifrao_e_some_em_qualquer_erro(tmp_path, monkeypatch):
+    from datetime import date
+    from pathlib import Path
+
+    import openpyxl
+
+    from consolidacao.exportacao import escrever_excel
+    from consolidacao.processamento import listar_arquivos_entrada
+
+    vistos = []
+
+    def falhar(self, nome):
+        vistos.append(Path(nome))
+        Path(nome).write_bytes(b"meio arquivo")
+        raise RuntimeError("falha inesperada do openpyxl")
+
+    monkeypatch.setattr(openpyxl.Workbook, "save", falhar)
+    pasta = tmp_path / "saida"
+    with pytest.raises(RuntimeError):
+        escrever_excel(_consolidado(_tabela()), pasta / "r.xlsx")
+    monkeypatch.undo()
+    assert vistos and vistos[0].name.startswith("~$")
+    assert list(pasta.iterdir()) == []
+    # Um temporario esquecido (ex.: processo morto) nao e lido como entrada no proximo run.
+    _arquivo_ok(pasta)
+    (pasta / vistos[0].name).write_bytes(b"x")
+    assert [p.name for p in listar_arquivos_entrada(pasta, date(2026, 10, 23))] == ["PC123 x.xlsx"]
+
+
+def _tabela():
+    import pandas as pd
+
+    return pd.DataFrame({"X": pd.Series(["a"], dtype=object)})
+
+
+def test_c6_progresso_avisa_a_gravacao_no_fim(tmp_path):
+    from consolidacao.pipeline import ETAPA_GRAVACAO, executar
+
+    a, b = _arquivo_ok(tmp_path, "PC123 a.xlsx"), _arquivo_ok(tmp_path, "PC123 b.xlsx")
+    vistos = []
+    executar([a, b], {"123": "A"}, tmp_path / "o" / "r.xlsx",
+             progresso=lambda i, total, nome: vistos.append((i, total, nome)))
+    assert vistos == [(1, 2, "PC123 a.xlsx"), (2, 2, "PC123 b.xlsx"), (2, 2, ETAPA_GRAVACAO)]
+    assert ETAPA_GRAVACAO == "Gravando arquivo de saida"
+
+
+def test_c6_erro_no_callback_de_progresso_nao_aborta(tmp_path):
+    from consolidacao.pipeline import executar
+
+    def quebrado(i, total, nome):
+        raise ValueError("bug na barra de progresso")
+
+    saida = tmp_path / "o" / "r.xlsx"
+    c = executar([_arquivo_ok(tmp_path)], {"123": "A"}, saida, progresso=quebrado)
+    assert saida.exists() and len(c.consolidado) == 4
+
+
+def test_c6_cancelar_pelo_callback_de_progresso_continua_valendo(tmp_path):
+    from consolidacao.erros import ProcessamentoCancelado
+    from consolidacao.pipeline import executar
+
+    def cancela(i, total, nome):
+        raise ProcessamentoCancelado("cancelado")
+
+    saida = tmp_path / "o" / "r.xlsx"
+    with pytest.raises(ProcessamentoCancelado):
+        executar([_arquivo_ok(tmp_path)], {"123": "A"}, saida, progresso=cancela)
+    assert not saida.exists()
+
+
+def test_c6_excecao_inesperada_vira_erro_de_validacao(tmp_path, monkeypatch):
+    import consolidacao.pipeline as pipeline
+
+    def explode(c, destino):
+        raise KeyError("coluna")
+
+    monkeypatch.setattr(pipeline, "escrever_excel", explode)
+    with pytest.raises(ErroValidacao, match="Erro inesperado") as info:
+        pipeline.executar([_arquivo_ok(tmp_path)], {"123": "A"}, tmp_path / "r.xlsx")
+    assert isinstance(info.value.__cause__, KeyError)
+
+
+@pytest.mark.parametrize("excecao", [MemoryError, KeyboardInterrupt])
+def test_c6_memoria_e_interrupcao_nao_sao_engolidas(tmp_path, monkeypatch, excecao):
+    import consolidacao.pipeline as pipeline
+
+    def explode(c, destino):
+        raise excecao()
+
+    monkeypatch.setattr(pipeline, "escrever_excel", explode)
+    with pytest.raises(excecao):
+        pipeline.executar([_arquivo_ok(tmp_path)], {"123": "A"}, tmp_path / "r.xlsx")

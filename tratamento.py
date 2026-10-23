@@ -12,8 +12,14 @@ from pathlib import Path
 from consolidacao.config import nome_saida, pasta_padrao
 from consolidacao.empresas import carregar_mapa_empresas
 from consolidacao.erros import ErroValidacao
-from consolidacao.pipeline import executar, resumir
+from consolidacao.pipeline import ETAPA_GRAVACAO, executar, resumir
 from consolidacao.processamento import listar_arquivos_entrada
+
+
+def _mostrar_progresso(i: int, total: int, nome: str) -> None:
+    # O R so imprime o nome de cada arquivo.
+    if nome != ETAPA_GRAVACAO:
+        print(f"Processando: {nome} ")
 
 
 def main(argv: list | None = None, hoje: date | None = None) -> int:
@@ -34,7 +40,7 @@ def main(argv: list | None = None, hoje: date | None = None) -> int:
         print(f"Arquivos de entrada encontrados: {len(arquivos)} \n")
         resultado = executar(
             arquivos, mapa, saida, arquivo_empresas=args.empresas,
-            progresso=lambda i, total, nome: print(f"Processando: {nome} "),
+            progresso=_mostrar_progresso,
         )
     except ErroValidacao as e:
         print(f"Erro: {e}")

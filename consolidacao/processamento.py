@@ -315,6 +315,19 @@ def _ordenar(df: pd.DataFrame, colunas: list) -> pd.DataFrame:
     return df.iloc[linhas].reset_index(drop=True)
 
 
+def avisar_progresso(progresso, i: int, total: int, nome: str) -> None:
+    """Chama o callback da interface; um defeito nele nao derruba o processamento.
+    ProcessamentoCancelado levantado pelo callback continua cancelando."""
+    if not progresso:
+        return
+    try:
+        progresso(i, total, nome)
+    except ProcessamentoCancelado:
+        raise
+    except Exception:
+        pass
+
+
 def processar_arquivos(
     caminhos: list,
     mapa: dict,
@@ -329,8 +342,7 @@ def processar_arquivos(
     for i, caminho in enumerate(caminhos, start=1):
         if cancelar and cancelar():
             raise ProcessamentoCancelado("Processamento cancelado pelo usuario.")
-        if progresso:
-            progresso(i, total, Path(caminho).name)
+        avisar_progresso(progresso, i, total, Path(caminho).name)
         resultados.append(processar_arquivo(caminho, mapa))
 
     # Adiciona um arquivo por vez para registrar no log uma eventual incompatibilidade.

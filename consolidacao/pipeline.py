@@ -5,9 +5,12 @@ import os
 from pathlib import Path
 from typing import Callable
 
-from .erros import ErroValidacao
+from .erros import ErroValidacao, ProcessamentoCancelado
 from .exportacao import escrever_excel
-from .processamento import Consolidado, processar_arquivos
+from .processamento import Consolidado, avisar_progresso, processar_arquivos
+
+# Nome passado ao progresso depois do ultimo arquivo, durante a gravacao.
+ETAPA_GRAVACAO = "Gravando arquivo de saida"
 
 
 def _mesmo_arquivo(a: Path, b: Path) -> bool:
@@ -44,11 +47,26 @@ def executar(
     cancelar: Callable[[], bool] | None = None,
     arquivo_empresas: Path | None = None,
 ) -> Consolidado:
-    """Processa os arquivos e grava o Excel consolidado em `saida`."""
+    """Processa os arquivos e grava o Excel consolidado em `saida`.
+
+    progresso(i, total, nome) e chamado antes de cada arquivo e, por fim, com
+    (total, total, ETAPA_GRAVACAO). Excecoes possiveis: ErroValidacao (inclusive
+    para falhas inesperadas, com a original em __cause__), ProcessamentoCancelado
+    e MemoryError."""
     saida = Path(saida)
-    _validar_saida(saida, arquivos, arquivo_empresas)
-    resultado = processar_arquivos(arquivos, mapa, progresso=progresso, cancelar=cancelar)
-    escrever_excel(resultado, saida)
+    try:
+        _validar_saida(saida, arquivos, arquivo_empresas)
+        resultado = processar_arquivos(arquivos, mapa, progresso=progresso, cancelar=cancelar)
+        total = len(arquivos)
+        avisar_progresso(progresso, total, total, ETAPA_GRAVACAO)
+        escrever_excel(resultado, saida)
+    except (ErroValidacao, ProcessamentoCancelado, MemoryError):
+        raise
+    except Exception as e:
+        # KeyboardInterrupt nao e Exception e continua passando direto.
+        raise ErroValidacao(
+            f"Erro inesperado ao gerar a consolidacao ({type(e).__name__}: {e})."
+        ) from e
     return resultado
 
 
