@@ -473,3 +473,68 @@ def test_c10_pasta_1904_data_em_coluna_texto_vira_serial_1904(tmp_path):
     # readxl devolve o serial gravado (rev2/B c05_1904): R "42383" e "16953".
     assert df["CODIGO"].tolist() == ["42383", "16953"]
     assert [v.date() for v in df["DATA DE NASCIMENTO"]] == [date(2020, 1, 15), date(1950, 6, 1)]
+
+
+# C3 ------------------------------------------------------------------------
+
+DEPENDENTES_COM_TIPO = [dict({"TIPO DE REGISTRO": "3"}, **d) for d in DEPENDENTE_OK]
+
+
+def _arquivo_dependente_com_tipo(pasta, fim):
+    """Aba DEPENDENTE no formato real (coluna TIPO DE REGISTRO), com as linhas
+    finais trocadas por `fim`."""
+    import openpyxl
+
+    p = pasta / "PC123 x.xlsx"
+    criar_arquivo_pc(p, TITULAR_OK, DEPENDENTES_COM_TIPO, SUPLEMENTAR_OK)
+    wb = openpyxl.load_workbook(p)
+    ws = wb["DEPENDENTE"]
+    ws.delete_rows(ws.max_row - 1, 2)
+    for linha in fim:
+        ws.append(linha)
+    wb.save(p)
+    return p
+
+
+TOTAIS_REAIS = [["TIPO DE REGISTRO", "TOTAL DE TITULARES", "TOTAL DE DEPENDENTES"], ["4", "2", "2"]]
+
+
+@pytest.mark.parametrize("tipo", ["4", " 4 ", 4])
+def test_c3_formato_real_remove_os_totais_sem_aviso(tmp_path, tipo):
+    from consolidacao.leitura import ler_dependente
+
+    fim = [TOTAIS_REAIS[0], [tipo, "2", "2"]]
+    r = ler_dependente(_arquivo_dependente_com_tipo(tmp_path, fim), "DEPENDENTE", "PC1")
+    assert r.dados["NOME DEPENDENTE"].tolist() == ["CAIO TESTE", "DORA SEM TITULAR"]
+    assert r.avisos_estrutura == []
+
+
+def test_c3_sem_linha_tipo_4_nao_corta_e_avisa(tmp_path):
+    from consolidacao.processamento import processar_arquivo
+
+    # Exportacao truncada: a aba termina no ultimo dependente, sem os totais.
+    p = _arquivo_dependente_com_tipo(tmp_path, [])
+    r = processar_arquivo(p, {"123": "A"})
+    assert r.status == "OK" and r.n_dependentes == 2
+    assert "DEPENDENTE: ultima linha sem TIPO DE REGISTRO 4 (resumo); nenhuma linha removida" in r.avisos
+
+
+def test_c3_um_dependente_sem_totais_nao_vira_erro(tmp_path):
+    import openpyxl
+
+    from consolidacao.leitura import ler_dependente
+
+    p = _arquivo_dependente_com_tipo(tmp_path, [])
+    wb = openpyxl.load_workbook(p)
+    wb["DEPENDENTE"].delete_rows(3)
+    wb.save(p)
+    r = ler_dependente(p, "DEPENDENTE", "PC1")
+    assert r.dados["NOME DEPENDENTE"].tolist() == ["CAIO TESTE"]
+    assert len(r.avisos_estrutura) == 1
+
+
+def test_c3_sem_coluna_tipo_corta_como_o_r(tmp_path):
+    from consolidacao.leitura import ler_dependente
+
+    r = ler_dependente(_arquivo_ok(tmp_path), "DEPENDENTE", "PC1")
+    assert len(r.dados) == 2 and r.avisos_estrutura == []

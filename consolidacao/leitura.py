@@ -37,6 +37,8 @@ class ResultadoAba:
     avisos: list = field(default_factory=list)
     observacoes_datas: list = field(default_factory=list)
     divergencias_datas: list = field(default_factory=list)
+    # Avisos que nao existem no R (desvios protetores); vao para AVISOS_ESTRUTURA.
+    avisos_estrutura: list = field(default_factory=list)
 
 
 # Celula que existe na planilha mas e NA (erro do Excel, texto vazio ou so
@@ -278,18 +280,38 @@ def ler_titular(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoA
     )
 
 
+AVISO_SEM_RESUMO = (
+    "DEPENDENTE: ultima linha sem TIPO DE REGISTRO 4 (resumo); nenhuma linha removida"
+)
+
+
+def _sem_linha_de_resumo(bruto: pd.DataFrame) -> bool:
+    # So decide quando a aba tem a coluna TIPO DE REGISTRO; sem ela, corta como o R.
+    tipos = [c for c in bruto.columns if normalizar_nome(c) == "TIPO_DE_REGISTRO"]
+    if not tipos or len(bruto) == 0:
+        return False
+    ultimo = bruto[tipos[0]].iloc[-1]
+    return ultimo is None or trimws(str(ultimo)) != "4"
+
+
 def ler_dependente(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
     contexto = f"DEPENDENTE: {referencia}"
     bruto = ler_aba(caminho, aba, skip=0, wb=wb)
+    avisos_estrutura = []
 
-    if len(bruto) <= 2:
-        raise ErroValidacao(
-            f"[{contexto}] Ha {len(bruto)} linha(s); nao existem dados apos remover "
-            "as duas linhas finais de resumo."
-        )
-
-    # As duas linhas finais sao sintese/resumo, nao registros nem erros de layout.
-    df = bruto.iloc[: len(bruto) - 2].copy()
+    if _sem_linha_de_resumo(bruto):
+        # Desvio protetor do R: no formato real a ultima linha e o resumo
+        # (TIPO DE REGISTRO 4). Sem ela, cortar levaria 2 dependentes reais.
+        avisos_estrutura.append(AVISO_SEM_RESUMO)
+        df = bruto.copy()
+    else:
+        if len(bruto) <= 2:
+            raise ErroValidacao(
+                f"[{contexto}] Ha {len(bruto)} linha(s); nao existem dados apos remover "
+                "as duas linhas finais de resumo."
+            )
+        # As duas linhas finais sao sintese/resumo, nao registros nem erros de layout.
+        df = bruto.iloc[: len(bruto) - 2].copy()
     regras = {
         "REATIVA": "DATA DE REATIVACAO",
         "SEXO.*DEPENDENTE": "SEXO",
@@ -323,6 +345,7 @@ def ler_dependente(caminho: Path, aba: str, referencia: str, wb=None) -> Resulta
         avisos=[c for c in COLUNAS_OPCIONAIS_DEPENDENTE if c not in df.columns],
         observacoes_datas=observacoes,
         divergencias_datas=divergencias,
+        avisos_estrutura=avisos_estrutura,
     )
 
 

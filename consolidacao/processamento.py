@@ -202,6 +202,7 @@ def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
             avisos.append("TITULAR ausente: " + ", ".join(titular_info.avisos))
         if dependente_info.avisos:
             avisos.append("DEPENDENTE ausente: " + ", ".join(dependente_info.avisos))
+        avisos += dependente_info.avisos_estrutura
         if titulares_sem_suplemento > 0:
             avisos.append(f"Titulares sem registro na aba suplementar: {titulares_sem_suplemento}")
         if suplementares_sem_titular > 0:
