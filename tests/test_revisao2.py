@@ -448,3 +448,28 @@ def test_c9_espaco_ascii_continua_aceito():
     from consolidacao.datas import parse_formato_r
 
     assert parse_formato_r("05/ 05/1980", "%d/%m/%Y") == date(1980, 5, 5)
+
+
+# C10 -----------------------------------------------------------------------
+
+def test_c10_pasta_1904_data_em_coluna_texto_vira_serial_1904(tmp_path):
+    from datetime import date, datetime
+
+    import openpyxl
+    from openpyxl.utils.datetime import CALENDAR_MAC_1904
+
+    from consolidacao.leitura import ler_aba
+
+    wb = openpyxl.Workbook()
+    wb.epoch = CALENDAR_MAC_1904
+    ws = wb.active
+    ws.title = "A"
+    ws.append(["CODIGO", "DATA DE NASCIMENTO"])
+    ws.append([datetime(2020, 1, 15), datetime(2020, 1, 15)])
+    ws.append([datetime(1950, 6, 1), datetime(1950, 6, 1)])
+    p = tmp_path / "x.xlsx"
+    wb.save(p)
+    df = ler_aba(p, "A")
+    # readxl devolve o serial gravado (rev2/B c05_1904): R "42383" e "16953".
+    assert df["CODIGO"].tolist() == ["42383", "16953"]
+    assert [v.date() for v in df["DATA DE NASCIMENTO"]] == [date(2020, 1, 15), date(1950, 6, 1)]

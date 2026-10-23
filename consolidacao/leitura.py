@@ -9,7 +9,7 @@ from xml.etree import ElementTree
 import openpyxl
 import pandas as pd
 from openpyxl.styles.numbers import is_date_format
-from openpyxl.utils.datetime import from_excel, to_excel
+from openpyxl.utils.datetime import WINDOWS_EPOCH, from_excel, to_excel
 
 from .cabecalhos import (
     chave_certificado,
@@ -75,8 +75,9 @@ def _numero_como_texto(x) -> str:
     return format(float(x), ".15g")
 
 
-def _como_texto(v):
-    # Equivalente a col_types = "text" do readxl.
+def _como_texto(v, epoch=WINDOWS_EPOCH):
+    # Equivalente a col_types = "text" do readxl. Data volta ao serial gravado,
+    # inclusive em pasta com data 1904.
     if v is None or isinstance(v, str):
         return v
     if isinstance(v, bool):
@@ -84,7 +85,7 @@ def _como_texto(v):
     if isinstance(v, (int, float)):
         return _numero_como_texto(v)
     if isinstance(v, (datetime, date, time)):
-        return _numero_como_texto(to_excel(v))
+        return _numero_como_texto(to_excel(v, epoch))
     return str(v)
 
 
@@ -199,7 +200,8 @@ def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None) -> pd.DataFrame:
         # transforma numeros fora da faixa em erro e duracoes em timedelta.
         wb._date_formats = set()
         wb._timedelta_formats = set()
-        linhas = [[_valor_bruto(c, wb.epoch) for c in linha] for linha in ws.iter_rows()]
+        epoch = wb.epoch
+        linhas = [[_valor_bruto(c, epoch) for c in linha] for linha in ws.iter_rows()]
     finally:
         if proprio:
             wb.close()
@@ -220,12 +222,12 @@ def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None) -> pd.DataFrame:
     inicio, fim = min(colunas_usadas), max(colunas_usadas) + 1
     linhas = [[_sem_marcador(v) for v in (l + [None] * fim)[inicio:fim]] for l in linhas]
 
-    cabecalho = ["" if v is None else _como_texto(v) for v in linhas[0]]
+    cabecalho = ["" if v is None else _como_texto(v, epoch) for v in linhas[0]]
     colunas = {}
     for j, nome in enumerate(cabecalho):
         valores = [l[j] for l in linhas[1:]]
         if "DATA" not in normalizar_nome(nome):
-            valores = [_como_texto(v) for v in valores]
+            valores = [_como_texto(v, epoch) for v in valores]
         colunas[j] = valores
 
     df = pd.DataFrame({j: pd.Series(v, dtype=object) for j, v in colunas.items()})
