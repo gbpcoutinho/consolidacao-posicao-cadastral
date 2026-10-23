@@ -33,7 +33,7 @@ def main(argv: list | None = None, hoje: date | None = None) -> int:
         arquivos = listar_arquivos_entrada(args.entrada, hoje)
         print(f"Arquivos de entrada encontrados: {len(arquivos)} \n")
         resultado = executar(
-            arquivos, mapa, saida,
+            arquivos, mapa, saida, arquivo_empresas=args.empresas,
             progresso=lambda i, total, nome: print(f"Processando: {nome} "),
         )
     except ErroValidacao as e:
