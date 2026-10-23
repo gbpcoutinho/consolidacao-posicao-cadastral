@@ -12,13 +12,14 @@ from pathlib import Path
 from consolidacao.config import nome_saida, pasta_padrao
 from consolidacao.empresas import carregar_mapa_empresas
 from consolidacao.erros import ErroValidacao
-from consolidacao.exportacao import escrever_excel
-from consolidacao.processamento import listar_arquivos_entrada, processar_arquivos
+from consolidacao.pipeline import executar, resumir
+from consolidacao.processamento import listar_arquivos_entrada
 
 
-def main(argv: list | None = None) -> int:
+def main(argv: list | None = None, hoje: date | None = None) -> int:
+    # Padroes relativos a este script: valem so para a linha de comando.
     raiz = Path(__file__).resolve().parent
-    hoje = date.today()
+    hoje = hoje or date.today()
 
     parser = argparse.ArgumentParser(description="Consolida planilhas de posicao cadastral.")
     parser.add_argument("--entrada", type=Path, default=pasta_padrao(raiz, hoje))
@@ -30,32 +31,29 @@ def main(argv: list | None = None) -> int:
     try:
         mapa = carregar_mapa_empresas(args.empresas)
         arquivos = listar_arquivos_entrada(args.entrada, hoje)
+        print(f"Arquivos de entrada encontrados: {len(arquivos)} \n")
+        resultado = executar(
+            arquivos, mapa, saida,
+            progresso=lambda i, total, nome: print(f"Processando: {nome} "),
+        )
     except ErroValidacao as e:
         print(f"Erro: {e}")
         return 1
 
-    print(f"Arquivos de entrada encontrados: {len(arquivos)} \n")
-    resultado = processar_arquivos(
-        arquivos, mapa, progresso=lambda nome: print(f"Processando: {nome} ")
-    )
-    escrever_excel(resultado, saida)
-
-    log = resultado.log
-    arquivos_ok = int((log["STATUS"] == "OK").sum())
-    arquivos_erro = int((log["STATUS"] == "ERRO").sum())
+    r = resumir(resultado)
     print("\n====================================")
     print("RESUMO DO PROCESSAMENTO")
     print("====================================")
-    print(f"Arquivos processados com sucesso: {arquivos_ok} ")
-    print(f"Arquivos com erro: {arquivos_erro} ")
-    print(f"Registros consolidados: {len(resultado.consolidado)} ")
-    print(f"Pendencias encontradas: {len(resultado.pendencias)} ")
-    print(f"Valores de data invalidos registrados: {int(log['DATAS_INVALIDAS'].sum())} ")
-    print(f"Divergencias entre datas principais e Y2K: {int(log['QTD_DIVERGENCIAS_DATAS'].sum())} ")
-    if arquivos_erro > 0:
+    print(f"Arquivos processados com sucesso: {r['arquivos_ok']} ")
+    print(f"Arquivos com erro: {r['arquivos_erro']} ")
+    print(f"Registros consolidados: {r['registros']} ")
+    print(f"Pendencias encontradas: {r['pendencias']} ")
+    print(f"Valores de data invalidos registrados: {r['datas_invalidas']} ")
+    print(f"Divergencias entre datas principais e Y2K: {r['divergencias_datas']} ")
+    if r["erros"]:
         print("\nArquivos com erro:")
-        for _, linha in log[log["STATUS"] == "ERRO"].iterrows():
-            print(f" - {linha['ARQUIVO']} : {linha['MENSAGEM']} ")
+        for arquivo, mensagem in r["erros"]:
+            print(f" - {arquivo} : {mensagem} ")
     print("====================================")
     print(f"Arquivo gerado: {saida} ")
     print("Abas: Base Tratada, Pendencias, Log")

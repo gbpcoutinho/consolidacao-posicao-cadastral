@@ -5,7 +5,8 @@ from pathlib import Path
 
 import openpyxl
 import pandas as pd
-from openpyxl.utils.datetime import to_excel
+from openpyxl.styles.numbers import is_date_format
+from openpyxl.utils.datetime import from_excel, to_excel
 
 from .cabecalhos import (
     chave_certificado,
@@ -40,11 +41,18 @@ class ResultadoAba:
 _PRESENTE_NA = object()
 
 
-def _valor_bruto(celula):
+def _valor_bruto(celula, epoch):
     # Celulas com erro do Excel (#N/A etc.) sao NA no readxl.
     if getattr(celula, "data_type", None) == "e":
         return _PRESENTE_NA
     v = celula.value
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and is_date_format(celula.number_format):
+        # Numero fora da faixa de datas (ex.: CPF em celula com formato de data)
+        # fica como numero, como no readxl, em vez de virar erro.
+        try:
+            return from_excel(v, epoch)
+        except (ValueError, OverflowError):
+            return v
     if isinstance(v, str):
         # readxl: trim_ws = TRUE (so espaco e tab) e na = "".
         v = v.strip(" \t")
@@ -75,15 +83,27 @@ def _como_texto(v):
     return str(v)
 
 
-def ler_aba(caminho: Path, aba: str, skip: int = 0) -> pd.DataFrame:
-    wb = openpyxl.load_workbook(caminho, read_only=True, data_only=True)
+def abrir_planilha(caminho: Path):
+    """Abre o arquivo uma vez para ler todas as abas (feche com .close())."""
+    return openpyxl.load_workbook(caminho, read_only=True, data_only=True)
+
+
+def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None) -> pd.DataFrame:
+    proprio = wb is None
+    if proprio:
+        wb = abrir_planilha(caminho)
     try:
         ws = wb[aba]
         # O readxl nao usa o <dimension> gravado no arquivo; ele pode estar errado.
         ws.reset_dimensions()
-        linhas = [[_valor_bruto(c) for c in linha] for linha in ws.iter_rows()]
+        # A conversao de datas e duracoes e feita em _valor_bruto: a do openpyxl
+        # transforma numeros fora da faixa em erro e duracoes em timedelta.
+        wb._date_formats = set()
+        wb._timedelta_formats = set()
+        linhas = [[_valor_bruto(c, wb.epoch) for c in linha] for linha in ws.iter_rows()]
     finally:
-        wb.close()
+        if proprio:
+            wb.close()
 
     linhas = linhas[skip:]
     # Linhas vazias no inicio e no fim sao ignoradas, como no readxl.
@@ -119,9 +139,9 @@ def _adicionar_coluna(df: pd.DataFrame, nome: str, valores) -> None:
     df[nome] = pd.Series(list(valores), index=df.index, dtype=object)
 
 
-def ler_titular(caminho: Path, aba: str, referencia: str) -> ResultadoAba:
+def ler_titular(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
     contexto = f"TITULAR: {referencia}"
-    df = ler_aba(caminho, aba, skip=2)
+    df = ler_aba(caminho, aba, skip=2, wb=wb)
     regras = {
         "REATIVA": "DATA DE REATIVACAO",
         "REGI.O": "REGIAO",
@@ -154,9 +174,9 @@ def ler_titular(caminho: Path, aba: str, referencia: str) -> ResultadoAba:
     )
 
 
-def ler_dependente(caminho: Path, aba: str, referencia: str) -> ResultadoAba:
+def ler_dependente(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
     contexto = f"DEPENDENTE: {referencia}"
-    bruto = ler_aba(caminho, aba, skip=0)
+    bruto = ler_aba(caminho, aba, skip=0, wb=wb)
 
     if len(bruto) <= 2:
         raise ErroValidacao(
@@ -254,9 +274,9 @@ def agregar_aba_suplementar(df: pd.DataFrame, contexto: str) -> pd.DataFrame:
     return pd.DataFrame(linhas, columns=[".CHAVE_CERTIFICADO", ".CARTAO_SUP", ".NOME_MAE_SUP"], dtype=object)
 
 
-def ler_suplementar(caminho: Path, aba: str, referencia: str) -> ResultadoAba:
+def ler_suplementar(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
     contexto = f"POS. CADASTRAL (NOME M E): {referencia}"
-    df = ler_aba(caminho, aba, skip=0)
+    df = ler_aba(caminho, aba, skip=0, wb=wb)
     regras = {"^CART.?O$": "CARTAO", "^NOME_DA_M.?E$": "NOME DA MAE"}
     df = renomear_e_validar_cabecalhos(df, regras, contexto)
     df, observacoes, divergencias = validar_colunas_data(df, contexto)

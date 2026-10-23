@@ -12,8 +12,8 @@ from .cabecalhos import chave_locale, normalizar_nome, trimws, unificar_colunas
 from .config import CODIGO_UNICO, NOMES_SAIDA_LEGADOS, ORDEM_INICIAL, nome_saida
 from .datas import resumir_observacoes_datas
 from .empresas import empresa_da_referencia
-from .erros import ErroValidacao
-from .leitura import ler_dependente, ler_suplementar, ler_titular
+from .erros import ErroValidacao, ProcessamentoCancelado
+from .leitura import abrir_planilha, ler_dependente, ler_suplementar, ler_titular
 
 COLUNAS_PENDENCIAS = [
     "REFERENCIA", "EMPRESA", "NUMERO DA SUBFATURA", "NUMERO DO CERTIFICADO",
@@ -57,14 +57,6 @@ def _coluna(df: pd.DataFrame, nome: str, valores) -> None:
     df[nome] = pd.Series(list(valores), index=df.index, dtype=object)
 
 
-def _abas_do_arquivo(caminho: Path) -> list:
-    wb = openpyxl.load_workbook(caminho, read_only=True)
-    try:
-        return list(wb.sheetnames)
-    finally:
-        wb.close()
-
-
 def _exatamente_uma(abas, padrao, descricao):
     encontradas = [a for a in abas if re.search(padrao, normalizar_nome(a))]
     if len(encontradas) != 1:
@@ -79,11 +71,14 @@ def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
     arquivo = caminho.name
     referencia = caminho.stem
     observacoes_datas, divergencias_datas = [], []
+    wb = None
 
     try:
         codigo_empresa, empresa = empresa_da_referencia(referencia, mapa)
 
-        abas = _abas_do_arquivo(caminho)
+        # Abre o arquivo uma unica vez para todas as abas.
+        wb = abrir_planilha(caminho)
+        abas = list(wb.sheetnames)
         aba_titular = _exatamente_uma(abas, "TITULAR", "de TITULAR")
         aba_dependente = _exatamente_uma(abas, "DEPENDENT", "de DEPENDENTE")
         aba_suplementar = _exatamente_uma(
@@ -91,13 +86,13 @@ def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
         )
 
         # As observacoes so entram depois que cada leitor termina, como no R.
-        titular_info = ler_titular(caminho, aba_titular, referencia)
+        titular_info = ler_titular(caminho, aba_titular, referencia, wb=wb)
         observacoes_datas += titular_info.observacoes_datas
         divergencias_datas += titular_info.divergencias_datas
-        dependente_info = ler_dependente(caminho, aba_dependente, referencia)
+        dependente_info = ler_dependente(caminho, aba_dependente, referencia, wb=wb)
         observacoes_datas += dependente_info.observacoes_datas
         divergencias_datas += dependente_info.divergencias_datas
-        suplementar_info = ler_suplementar(caminho, aba_suplementar, referencia)
+        suplementar_info = ler_suplementar(caminho, aba_suplementar, referencia, wb=wb)
         observacoes_datas += suplementar_info.observacoes_datas
         divergencias_datas += suplementar_info.divergencias_datas
 
@@ -115,9 +110,12 @@ def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
         )
 
         certificados = titular[".CHAVE_CERTIFICADO"].tolist()
-        duplicados = list(dict.fromkeys(
-            c for i, c in enumerate(certificados) if c in certificados[:i]
-        ))
+        vistos, duplicados = set(), {}
+        for c in certificados:
+            if c in vistos:
+                duplicados[c] = None
+            vistos.add(c)
+        duplicados = list(duplicados)
         if duplicados:
             raise ErroValidacao(
                 "Certificado(s) duplicado(s) na aba TITULAR: " + ", ".join(duplicados)
@@ -182,8 +180,9 @@ def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
         ])
 
         chaves_sup = suplementar[".CHAVE_CERTIFICADO"].tolist()
-        titulares_sem_suplemento = sum(c not in chaves_sup for c in certificados)
-        suplementares_sem_titular = sum(c not in certificados for c in chaves_sup)
+        conjunto_sup, conjunto_tit = set(chaves_sup), set(certificados)
+        titulares_sem_suplemento = sum(c not in conjunto_sup for c in certificados)
+        suplementares_sem_titular = sum(c not in conjunto_tit for c in chaves_sup)
         titulares_sem_cartao = sum(not _preenchido(v) for v in titular["NUMERO DO CARTAO"])
         titulares_sem_nome_mae = sum(not _preenchido(v) for v in titular["NOME DA MAE"])
 
@@ -227,6 +226,9 @@ def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
             observacoes_datas=observacoes_datas,
             divergencias_datas=divergencias_datas,
         )
+    finally:
+        if wb is not None:
+            wb.close()
 
 
 # ----------------------------------------------------------------------------
@@ -316,12 +318,19 @@ def _ordenar(df: pd.DataFrame, colunas: list) -> pd.DataFrame:
 def processar_arquivos(
     caminhos: list,
     mapa: dict,
-    progresso: Callable[[str], None] | None = None,
+    progresso: Callable[[int, int, str], None] | None = None,
+    cancelar: Callable[[], bool] | None = None,
 ) -> Consolidado:
+    """progresso(i, total, nome) e chamado antes de cada arquivo (i comeca em 1).
+    cancelar() e consultado antes de cada arquivo; True interrompe com
+    ProcessamentoCancelado."""
     resultados = []
-    for caminho in caminhos:
+    total = len(caminhos)
+    for i, caminho in enumerate(caminhos, start=1):
+        if cancelar and cancelar():
+            raise ProcessamentoCancelado("Processamento cancelado pelo usuario.")
         if progresso:
-            progresso(Path(caminho).name)
+            progresso(i, total, Path(caminho).name)
         resultados.append(processar_arquivo(caminho, mapa))
 
     # Adiciona um arquivo por vez para registrar no log uma eventual incompatibilidade.
