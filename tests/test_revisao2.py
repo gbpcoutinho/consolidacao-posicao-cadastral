@@ -83,3 +83,42 @@ def test_c4_csv_sem_permissao_vira_erro_de_validacao(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "read_bytes", travado)
     with pytest.raises(ErroValidacao, match="em uso ou sem permissao"):
         carregar_mapa_empresas(p)
+
+
+# C5 ------------------------------------------------------------------------
+
+def _consolidado(base, pendencias=None, log=None):
+    import pandas as pd
+
+    from consolidacao.processamento import Consolidado
+
+    vazio = pd.DataFrame({"X": pd.Series([], dtype=object)})
+    return Consolidado(
+        consolidado=base,
+        pendencias=vazio if pendencias is None else pendencias,
+        log=vazio if log is None else log,
+    )
+
+
+@pytest.mark.parametrize("aba", ["base", "pendencias"])
+def test_c5_aba_acima_do_limite_do_excel_e_recusada_antes_de_gravar(tmp_path, aba):
+    import pandas as pd
+
+    from consolidacao.exportacao import escrever_excel
+
+    grande = pd.DataFrame({"X": pd.Series([None] * 1_048_576, dtype=object)})
+    pequeno = pd.DataFrame({"X": pd.Series(["a"], dtype=object)})
+    c = _consolidado(grande, pequeno) if aba == "base" else _consolidado(pequeno, grande)
+    destino = tmp_path / "saida.xlsx"
+    with pytest.raises(ErroValidacao, match="1.048.575"):
+        escrever_excel(c, destino)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_c5_aba_no_limite_exato_e_aceita():
+    import pandas as pd
+
+    from consolidacao.exportacao import validar_limite_linhas
+
+    no_limite = pd.DataFrame({"X": pd.Series([None] * 1_048_575, dtype=object)})
+    validar_limite_linhas(_consolidado(no_limite))
