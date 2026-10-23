@@ -424,3 +424,27 @@ def test_c8_celula_so_com_quebra_de_linha_vira_na_e_o_resto_fica(tmp_path):
     wb.save(p)
     # readxl (rev2/B c07_espacos): so-quebra vira NA; "\nabc\n" e NBSP ficam.
     assert ler_aba(p, "A")["NOME DA MAE"].tolist() == [None, None, None, "\nabc\n", "\xa0", "x"]
+
+
+# C9 ------------------------------------------------------------------------
+
+@pytest.mark.parametrize("valor", [
+    "２０２０-01-15",  # digitos de largura total
+    "٢٠٢٠-01-15",  # digitos arabes
+    "\xa005/05/1980",  # NBSP antes do campo
+    "05/ 05/1980",  # espaco Unicode entre os campos
+])
+def test_c9_digitos_e_espacos_unicode_nao_valem_em_data(valor):
+    from consolidacao.datas import converter_celula_data
+
+    data, obs = converter_celula_data(valor, "DATA", 1, "C")
+    # strptime do R: data invalida, vai para o log (rev2/B strs.R, rev2/A datas_r.R).
+    assert data is None and obs is not None
+
+
+def test_c9_espaco_ascii_continua_aceito():
+    from datetime import date
+
+    from consolidacao.datas import parse_formato_r
+
+    assert parse_formato_r("05/ 05/1980", "%d/%m/%Y") == date(1980, 5, 5)
