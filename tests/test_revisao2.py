@@ -360,3 +360,48 @@ def test_c2_varredura_le_celulas_sem_atributo_r(tmp_path):
         (4, 3, "n", None, True),
         (4, 4, "n", "", False),
     ]
+
+
+# C11 -----------------------------------------------------------------------
+
+def test_c11_titular_com_linha_em_branco_entre_registro_e_cabecalho_e_rejeitado(tmp_path):
+    import openpyxl
+
+    from consolidacao.processamento import processar_arquivo
+
+    # rev2/A_opus_max/gen_e2e1.py (E6): o R para na leitura do cabecalho.
+    p = _arquivo_ok(tmp_path)
+    wb = openpyxl.load_workbook(p)
+    ws = wb["TITULAR"]
+    ws.cell(2, 1, "LINHA 2")
+    ws.insert_rows(3)
+    wb.save(p)
+    r = processar_arquivo(p, {"123": "A"})
+    assert (r.status, r.mensagem) == ("ERRO", "A aba 'TITULAR' nao tem cabecalhos identificaveis.")
+
+
+@pytest.mark.parametrize("linhas, esperado", [
+    # Conteudo antes do skip: o cabecalho e a linha do skip, mesmo vazia.
+    ([["X"], [], [], ["A"], ["1"]], "erro"),
+    # Nada antes do skip: linhas vazias depois dele sao puladas.
+    ([[], [], [], ["A"], ["1"]], ["1"]),
+    ([["X"], ["Y"], ["A"], ["1"]], ["1"]),
+])
+def test_c11_inicio_e_o_maior_entre_skip_e_primeira_linha_com_conteudo(tmp_path, linhas, esperado):
+    import openpyxl
+
+    from consolidacao.leitura import ler_aba
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "T"
+    for i, linha in enumerate(linhas, start=1):
+        for j, v in enumerate(linha, start=1):
+            ws.cell(i, j, v)
+    p = tmp_path / "x.xlsx"
+    wb.save(p)
+    if esperado == "erro":
+        with pytest.raises(ErroValidacao, match="A aba 'T' nao tem cabecalhos identificaveis."):
+            ler_aba(p, "T", skip=2)
+    else:
+        assert ler_aba(p, "T", skip=2)["A"].tolist() == esperado

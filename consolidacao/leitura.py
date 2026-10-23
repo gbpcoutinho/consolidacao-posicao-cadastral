@@ -203,12 +203,14 @@ def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None) -> pd.DataFrame:
             wb.close()
     _marcar_presentes(linhas, _presentes_sem_valor(caminho, aba))
 
-    linhas = linhas[skip:]
-    # Linhas vazias no inicio e no fim sao ignoradas, como no readxl.
+    # Como no readxl: o cabecalho fica na linha max(skip, 1a linha com conteudo
+    # da aba inteira). Se ha conteudo antes do skip e a linha do skip esta
+    # vazia, o R para aqui. Linhas vazias no fim sao ignoradas.
     nao_vazias = [i for i, l in enumerate(linhas) if any(v is not None for v in l)]
-    if not nao_vazias:
+    inicio = max(skip, nao_vazias[0]) if nao_vazias else skip
+    if not nao_vazias or inicio > nao_vazias[-1] or all(v is None for v in linhas[inicio]):
         raise ErroValidacao(f"A aba '{aba}' nao tem cabecalhos identificaveis.")
-    linhas = linhas[nao_vazias[0]: nao_vazias[-1] + 1]
+    linhas = linhas[inicio: nao_vazias[-1] + 1]
 
     colunas_usadas = [
         j for l in linhas for j, v in enumerate(l) if v is not None
