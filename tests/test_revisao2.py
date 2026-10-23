@@ -48,3 +48,38 @@ def test_c1_cli_recusa_saida_igual_a_entrada(tmp_path, capsys):
                    "--saida", str(a)])
     assert codigo == 1
     assert "e um dos arquivos de entrada" in capsys.readouterr().out
+
+
+# C4 ------------------------------------------------------------------------
+
+def test_c4_csv_em_codificacao_desconhecida_vira_erro_de_validacao(tmp_path):
+    from consolidacao.empresas import carregar_mapa_empresas
+
+    p = tmp_path / "e.csv"
+    # 0x81 nao existe no cp1252 nem e UTF-8 valido.
+    p.write_bytes(b"EMPRESA;COD_SAUDE\nA\x81;1\n")
+    with pytest.raises(ErroValidacao, match="codificacao"):
+        carregar_mapa_empresas(p)
+
+
+def test_c4_csv_que_e_pasta_vira_erro_de_validacao(tmp_path):
+    from consolidacao.empresas import carregar_mapa_empresas
+
+    with pytest.raises(ErroValidacao, match="Nao foi possivel ler o arquivo de empresas"):
+        carregar_mapa_empresas(tmp_path)
+
+
+def test_c4_csv_sem_permissao_vira_erro_de_validacao(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from consolidacao.empresas import carregar_mapa_empresas
+
+    p = tmp_path / "e.csv"
+    p.write_bytes(b"EMPRESA;COD_SAUDE\nA;1\n")
+
+    def travado(self):
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, "read_bytes", travado)
+    with pytest.raises(ErroValidacao, match="em uso ou sem permissao"):
+        carregar_mapa_empresas(p)

@@ -9,12 +9,26 @@ from .erros import ErroValidacao
 
 
 def _ler_texto(caminho: Path) -> str:
-    dados = caminho.read_bytes()
+    try:
+        dados = caminho.read_bytes()
+    except OSError as e:
+        # Pasta no lugar do arquivo, sem permissao ou travado por outro programa.
+        raise ErroValidacao(
+            f"Nao foi possivel ler o arquivo de empresas '{caminho}': confira se e um "
+            "arquivo .csv e se nao esta em uso ou sem permissao de leitura."
+        ) from e
     try:
         return dados.decode("utf-8-sig")
     except UnicodeDecodeError:
+        pass
+    try:
         # CSV salvo pelo Excel em ANSI. O R leria com acentos corrompidos.
         return dados.decode("cp1252")
+    except UnicodeDecodeError as e:
+        raise ErroValidacao(
+            f"O arquivo de empresas '{caminho}' esta em uma codificacao nao suportada; "
+            "salve-o novamente como CSV (UTF-8 ou ANSI)."
+        ) from e
 
 
 def carregar_mapa_empresas(caminho: Path) -> dict:
