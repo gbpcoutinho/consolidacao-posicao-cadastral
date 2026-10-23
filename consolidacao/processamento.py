@@ -341,6 +341,21 @@ def avisar_progresso(progresso, i: int, total: int, nome: str) -> None:
         pass
 
 
+def _avisar_repetidos(aceitos: list) -> None:
+    """Mesma empresa em mais de um arquivo (copia esquecida, reenvio "v2")
+    duplicaria registros em silencio. O R nao avisa; aqui vira aviso, nao erro."""
+    for r in aceitos:
+        outros = [o for o in aceitos if o is not r and o.codigo_empresa == r.codigo_empresa]
+        if not outros:
+            continue
+        nomes = ", ".join(o.arquivo for o in outros)
+        if any(o.referencia.casefold() == r.referencia.casefold() for o in outros):
+            aviso = f"REFERENCIA '{r.referencia}' repetida em outro(s) arquivo(s): {nomes}"
+        else:
+            aviso = f"CODIGO_EMPRESA '{r.codigo_empresa}' repetido em outro(s) arquivo(s): {nomes}"
+        r.avisos = f"{r.avisos} | {aviso}" if r.avisos else aviso
+
+
 def processar_arquivos(
     caminhos: list,
     mapa: dict,
@@ -377,6 +392,8 @@ def processar_arquivos(
             if tipo:
                 tipos_acumulados.setdefault(coluna, tipo)
         aceitos.append(r)
+
+    _avisar_repetidos(aceitos)
 
     if aceitos:
         consolidado = _bind_rows([r.final for r in aceitos])

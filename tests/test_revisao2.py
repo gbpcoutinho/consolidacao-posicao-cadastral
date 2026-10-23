@@ -558,3 +558,54 @@ def test_c12_sem_linha_vazia_sem_aviso(tmp_path):
 
     r = processar_arquivo(_arquivo_ok(tmp_path), {"123": "A"})
     assert "vazia" not in r.avisos
+
+
+# C13 -----------------------------------------------------------------------
+
+def test_c13_mesmo_codigo_de_empresa_em_dois_arquivos_avisa_nos_dois(tmp_path):
+    from consolidacao.processamento import processar_arquivos
+
+    a, b = _arquivo_ok(tmp_path, "PC123 a.xlsx"), _arquivo_ok(tmp_path, "PC123 b v2.xlsx")
+    outro = _arquivo_ok(tmp_path, "PC456 c.xlsx")
+    c = processar_arquivos([a, b, outro], {"123": "A", "456": "B"})
+    avisos = c.log["AVISOS_ESTRUTURA"].tolist()
+    assert avisos[0].endswith("CODIGO_EMPRESA '123' repetido em outro(s) arquivo(s): PC123 b v2.xlsx")
+    assert avisos[1].endswith("CODIGO_EMPRESA '123' repetido em outro(s) arquivo(s): PC123 a.xlsx")
+    assert "repetid" not in avisos[2]
+    # Aviso, nao erro: os dois entram na base.
+    assert c.log["STATUS"].tolist() == ["OK", "OK", "OK"] and len(c.consolidado) == 12
+
+
+def test_c13_mesma_referencia_em_pastas_diferentes(tmp_path):
+    from consolidacao.processamento import processar_arquivos
+
+    (tmp_path / "x").mkdir()
+    (tmp_path / "y").mkdir()
+    a, b = _arquivo_ok(tmp_path / "x", "PC123 m.xlsx"), _arquivo_ok(tmp_path / "y", "PC123 m.xlsx")
+    c = processar_arquivos([a, b], {"123": "A"})
+    assert c.log["AVISOS_ESTRUTURA"][0].endswith(
+        "REFERENCIA 'PC123 m' repetida em outro(s) arquivo(s): PC123 m.xlsx"
+    )
+
+
+def test_c13_arquivo_com_erro_nao_conta_como_repetido(tmp_path):
+    from consolidacao.processamento import processar_arquivos
+
+    ruim = tmp_path / "PC123 ruim.xlsx"
+    ruim.write_bytes(b"x")
+    c = processar_arquivos([_arquivo_ok(tmp_path), ruim], {"123": "A"})
+    assert "repetid" not in c.log["AVISOS_ESTRUTURA"][0]
+
+
+def test_c13_paridade_ignora_so_os_avisos_que_o_r_nao_tem():
+    from tests.paridade.comparar import sem_avisos_so_python
+
+    assert sem_avisos_so_python(
+        "Titulares sem CARTAO apos a juncao: 1 | CODIGO_EMPRESA '1' repetido em outro(s) "
+        "arquivo(s): a.xlsx | 2 linha(s) vazia(s) em DEPENDENTES"
+    ) == "Titulares sem CARTAO apos a juncao: 1"
+    assert sem_avisos_so_python("REFERENCIA 'X' repetida em outro(s) arquivo(s): a.xlsx") is None
+    assert sem_avisos_so_python(None) is None
+    assert sem_avisos_so_python("Titulares sem CARTAO apos a juncao: 1") == (
+        "Titulares sem CARTAO apos a juncao: 1"
+    )
