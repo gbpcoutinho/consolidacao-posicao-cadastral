@@ -405,3 +405,22 @@ def test_c11_inicio_e_o_maior_entre_skip_e_primeira_linha_com_conteudo(tmp_path,
             ler_aba(p, "T", skip=2)
     else:
         assert ler_aba(p, "T", skip=2)["A"].tolist() == esperado
+
+
+# C8 ------------------------------------------------------------------------
+
+def test_c8_celula_so_com_quebra_de_linha_vira_na_e_o_resto_fica(tmp_path):
+    import openpyxl
+
+    from consolidacao.leitura import ler_aba
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "A"
+    ws.append(["NOME DA MAE"])
+    for v in ["\n", " \t\n ", "\r\n", "\nabc\n", "\xa0", " x "]:
+        ws.append([v])
+    p = tmp_path / "x.xlsx"
+    wb.save(p)
+    # readxl (rev2/B c07_espacos): so-quebra vira NA; "\nabc\n" e NBSP ficam.
+    assert ler_aba(p, "A")["NOME DA MAE"].tolist() == [None, None, None, "\nabc\n", "\xa0", "x"]

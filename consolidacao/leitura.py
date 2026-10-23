@@ -57,9 +57,11 @@ def _valor_bruto(celula, epoch):
         except (ValueError, OverflowError):
             return v
     if isinstance(v, str):
-        # readxl: trim_ws = TRUE (so espaco e tab) e na = "".
-        v = v.strip(" \t")
-        return v if v != "" else _PRESENTE_NA
+        # readxl: trim_ws = TRUE (so espaco e tab) e na = "". Celula so com
+        # espacos e quebras de linha tambem e NA no readxl.
+        if v.strip(" \t\r\n") == "":
+            return _PRESENTE_NA
+        return v.strip(" \t")
     return v
 
 
