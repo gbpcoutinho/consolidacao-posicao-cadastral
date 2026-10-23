@@ -245,3 +245,118 @@ def test_c7_arquivo_em_uso_tem_mensagem_em_portugues(tmp_path, monkeypatch):
     assert (r.status, r.mensagem) == (
         "ERRO", "Nao foi possivel abrir o arquivo: arquivo em uso ou sem permissao."
     )
+
+
+# C2 ------------------------------------------------------------------------
+
+from tests import fabrica  # noqa: E402
+
+VARIANTES_SEM_VALOR = [
+    fabrica.FORMULA_TEXTO_CACHE_VAZIO,
+    fabrica.FORMULA_TEXTO_SEM_CACHE,
+    fabrica.FORMULA_NUMERO_SEM_CACHE,
+    fabrica.NUMERO_V_VAZIO,
+    fabrica.LOGICO_V_VAZIO,
+]
+IDS_SEM_VALOR = ["formula_cache_vazio", "formula_sem_cache", "formula_numero", "v_vazio", "logico_v_vazio"]
+
+
+def _planilha_com_marcador(caminho, linhas, variante):
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "A"
+    for linha in linhas:
+        ws.append(linha)
+    wb.save(caminho)
+    fabrica.trocar_celula(caminho, "__E__", variante)
+
+
+@pytest.mark.parametrize("variante", VARIANTES_SEM_VALOR, ids=IDS_SEM_VALOR)
+def test_c2_celula_com_formula_ou_v_vazio_conta_na_faixa(tmp_path, variante):
+    from consolidacao.leitura import ler_aba
+
+    p = tmp_path / "x.xlsx"
+    _planilha_com_marcador(p, [["NUMERO DO CERTIFICADO", "NOME"], ["001", "ANA"], ["__E__"]], variante)
+    df = ler_aba(p, "A")
+    # Como o readxl (rev2/A_opus_max/gen_ler3.py): 2 linhas, a segunda toda NA.
+    assert df["NUMERO DO CERTIFICADO"].tolist() == ["001", None]
+    assert df["NOME"].tolist() == ["ANA", None]
+
+
+@pytest.mark.parametrize("variante", VARIANTES_SEM_VALOR, ids=IDS_SEM_VALOR)
+def test_c2_celula_sem_valor_conta_na_faixa_de_colunas(tmp_path, variante):
+    from consolidacao.leitura import ler_aba
+
+    p = tmp_path / "x.xlsx"
+    _planilha_com_marcador(p, [["A", "B"], ["1", "2", "__E__"]], variante)
+    # O R rejeita a aba (3 colunas x 2 col_types); aqui a coluna sem nome e
+    # rejeitada adiante, como a coluna orfa com valor.
+    assert list(ler_aba(p, "A").columns) == ["A", "B", ""]
+
+
+def test_c2_dependente_com_totais_em_formula_sem_cache_nao_perde_registros(tmp_path):
+    import openpyxl
+
+    from consolidacao.leitura import ler_dependente
+
+    # rev2/B/dep.py (d01): 3 dependentes + 2 linhas de resumo gravadas por biblioteca.
+    cab = ["NUMERO DO CERTIFICADO", "NOME DEPENDENTE", "CODIGO DO DEPENDENTE", "GRAU PARENTESCO",
+           "NOME DA MAE DO DEPENDENTE", "NUMERO DO CARTAO DO DEPENDENTE"]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "S"
+    ws.append(cab)
+    for i in range(1, 4):
+        ws.append([f"C{i}", f"DEP{i}", "01", "FILHO", "MAE", f"K{i}"])
+    ws.append(["=COUNTA(A2:A4)"])
+    ws.append(['="TOTAL: "&COUNTA(B2:B4)'])
+    p = tmp_path / "d01.xlsx"
+    wb.save(p)
+    assert ler_dependente(p, "S", "REF").dados["NOME DEPENDENTE"].tolist() == ["DEP1", "DEP2", "DEP3"]
+
+
+def test_c2_titular_com_formula_vazia_abaixo_dos_dados_e_rejeitado_como_no_r(tmp_path):
+    import openpyxl
+
+    from consolidacao.processamento import processar_arquivo
+
+    # rev2/A_opus_max/gen_e2e1.py (E7): o R para com "Ha titular sem NUMERO DO CERTIFICADO".
+    p = _arquivo_ok(tmp_path)
+    wb = openpyxl.load_workbook(p)
+    ws = wb["TITULAR"]
+    ws.cell(ws.max_row + 1, 1, "__E__")
+    wb.save(p)
+    fabrica.trocar_celula(p, "__E__", fabrica.FORMULA_TEXTO_CACHE_VAZIO)
+    r = processar_arquivo(p, {"123": "A"})
+    assert r.status == "ERRO"
+    assert "Ha titular sem NUMERO DO CERTIFICADO" in r.mensagem
+
+
+def test_c2_varredura_le_celulas_sem_atributo_r(tmp_path):
+    import zipfile
+
+    from consolidacao.leitura import varrer_celulas
+
+    p = tmp_path / "x.xlsx"
+    _planilha_com_marcador(p, [["A"]], fabrica.FORMULA_TEXTO_SEM_CACHE)
+    xml = (
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+        '<row><c t="inlineStr"><is><t>A</t></is></c><c><v>7</v></c></row>'
+        '<row r="4"><c r="C4"><f>1+1</f></c><c><v/></c></row>'
+        "</sheetData></worksheet>"
+    )
+    q = tmp_path / "y.xlsx"
+    with zipfile.ZipFile(p) as origem, zipfile.ZipFile(q, "w") as destino:
+        for item in origem.infolist():
+            dados = origem.read(item.filename)
+            if item.filename == "xl/worksheets/sheet1.xml":
+                dados = xml.encode()
+            destino.writestr(item, dados)
+    assert list(varrer_celulas(q, "A")) == [
+        (1, 1, "inlineStr", None, False),
+        (1, 2, "n", "7", False),
+        (4, 3, "n", None, True),
+        (4, 4, "n", "", False),
+    ]

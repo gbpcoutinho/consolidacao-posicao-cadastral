@@ -1,7 +1,10 @@
 # Leitura e tratamento de cada aba (secoes 3 e 5 do TRATAMENTO.R).
+import posixpath
+import zipfile
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from pathlib import Path
+from xml.etree import ElementTree
 
 import openpyxl
 import pandas as pd
@@ -83,6 +86,100 @@ def _como_texto(v):
     return str(v)
 
 
+def _nome_local(tag: str) -> str:
+    # Ignora o namespace: ha geradores com prefixo (x:c) e o padrao "strict".
+    return tag.rsplit("}", 1)[-1]
+
+
+def _alvo(origem: str, alvo: str) -> str:
+    if alvo.startswith("/"):
+        return alvo.lstrip("/")
+    return posixpath.normpath(posixpath.join(posixpath.dirname(origem), alvo))
+
+
+def _relacoes(zf: zipfile.ZipFile, origem: str) -> dict:
+    rels = posixpath.join(posixpath.dirname(origem), "_rels", posixpath.basename(origem) + ".rels")
+    raiz = ElementTree.fromstring(zf.read(rels))
+    return {r.get("Id"): r for r in raiz if _nome_local(r.tag) == "Relationship"}
+
+
+def _xml_da_aba(zf: zipfile.ZipFile, aba: str) -> str:
+    """Caminho do XML da aba dentro do .xlsx, pelo nome que aparece no Excel."""
+    pacote = _relacoes(zf, "")
+    livro = next(
+        _alvo("", r.get("Target")) for r in pacote.values()
+        if r.get("Type", "").endswith("/officeDocument")
+    )
+    rels = _relacoes(zf, livro)
+    for elem in ElementTree.fromstring(zf.read(livro)).iter():
+        if _nome_local(elem.tag) == "sheet" and elem.get("name") == aba:
+            rid = next(v for k, v in elem.attrib.items() if _nome_local(k) == "id")
+            return _alvo(livro, rels[rid].get("Target"))
+    raise KeyError(aba)
+
+
+def _linha_coluna(ref: str) -> tuple:
+    letras = ref.rstrip("0123456789")
+    coluna = 0
+    for c in letras.upper():
+        coluna = coluna * 26 + ord(c) - 64
+    return int(ref[len(letras):]), coluna
+
+
+def varrer_celulas(caminho: Path, aba: str):
+    """Percorre o XML da aba e devolve (linha, coluna, tipo, <v> bruto, tem <f>)
+    de cada celula. <v> ausente vira None; <v/> vira "". Linhas e celulas sem
+    o atributo r seguem a anterior, como no openpyxl e no readxl."""
+    with zipfile.ZipFile(caminho) as zf, zf.open(_xml_da_aba(zf, aba)) as xml:
+        linha, coluna = 0, 0
+        celula = None
+        for evento, elem in ElementTree.iterparse(xml, events=("start", "end")):
+            nome = _nome_local(elem.tag)
+            if evento == "start":
+                if nome == "row":
+                    linha = int(elem.get("r")) if elem.get("r") else linha + 1
+                    coluna = 0
+                elif nome == "c":
+                    ref = elem.get("r")
+                    if ref:
+                        linha, coluna = _linha_coluna(ref)
+                    else:
+                        coluna += 1
+                    celula = [elem.get("t", "n"), None, False]
+                continue
+            if celula is not None:
+                if nome == "v":
+                    celula[1] = elem.text or ""
+                elif nome == "f":
+                    celula[2] = True
+                elif nome == "c":
+                    yield (linha, coluna, *celula)
+                    celula = None
+            if nome in ("c", "row"):
+                elem.clear()
+
+
+def _presentes_sem_valor(caminho: Path, aba: str) -> list:
+    # O readxl conta na faixa toda celula com <f> ou <v>, mesmo sem valor
+    # (formula sem cache, <v/>). O openpyxl le essas celulas como None.
+    return [
+        (linha, coluna)
+        for linha, coluna, _, valor, formula in varrer_celulas(caminho, aba)
+        if formula or valor == ""
+    ]
+
+
+def _marcar_presentes(linhas: list, presentes: list) -> None:
+    for linha, coluna in presentes:
+        while len(linhas) < linha:
+            linhas.append([])
+        valores = linhas[linha - 1]
+        if len(valores) < coluna:
+            valores.extend([None] * (coluna - len(valores)))
+        if valores[coluna - 1] is None:
+            valores[coluna - 1] = _PRESENTE_NA
+
+
 def abrir_planilha(caminho: Path):
     """Abre o arquivo uma vez para ler todas as abas (feche com .close())."""
     return openpyxl.load_workbook(caminho, read_only=True, data_only=True)
@@ -104,6 +201,7 @@ def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None) -> pd.DataFrame:
     finally:
         if proprio:
             wb.close()
+    _marcar_presentes(linhas, _presentes_sem_valor(caminho, aba))
 
     linhas = linhas[skip:]
     # Linhas vazias no inicio e no fim sao ignoradas, como no readxl.

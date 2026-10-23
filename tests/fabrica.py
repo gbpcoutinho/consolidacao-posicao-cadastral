@@ -126,3 +126,29 @@ def criar_arquivo_pc(
     _escrever_registros(ws, suplementar, _colunas(suplementar, SUPLEMENTAR_OK))
 
     wb.save(caminho)
+
+
+def trocar_celula(caminho: Path, marcador: str, xml_celula) -> None:
+    """Troca a celula de texto `marcador` pelo XML cru `xml_celula(ref)`, para
+    simular geradores que gravam formula sem valor em cache ou <v> vazio."""
+    caminho = Path(caminho)
+    temporario = caminho.with_suffix(".tmp")
+    padrao = re.compile(
+        r'<c r="([A-Z]+[0-9]+)"( s="\d+")? t="inlineStr"><is><t>'
+        + re.escape(marcador) + r"</t></is></c>"
+    )
+    with zipfile.ZipFile(caminho) as origem, zipfile.ZipFile(temporario, "w") as destino:
+        for item in origem.infolist():
+            dados = origem.read(item.filename)
+            if item.filename.startswith("xl/worksheets/sheet"):
+                dados = padrao.sub(lambda m: xml_celula(m.group(1)), dados.decode("utf-8")).encode("utf-8")
+            destino.writestr(item, dados)
+    shutil.move(temporario, caminho)
+
+
+# Celulas que o readxl conta na faixa lida, mas que o openpyxl le como vazias.
+FORMULA_TEXTO_CACHE_VAZIO = lambda ref: f'<c r="{ref}" t="str"><f>""</f><v></v></c>'  # noqa: E731
+FORMULA_TEXTO_SEM_CACHE = lambda ref: f'<c r="{ref}" t="str"><f>""</f></c>'  # noqa: E731
+FORMULA_NUMERO_SEM_CACHE = lambda ref: f'<c r="{ref}"><f>1+1</f></c>'  # noqa: E731
+NUMERO_V_VAZIO = lambda ref: f'<c r="{ref}"><v></v></c>'  # noqa: E731
+LOGICO_V_VAZIO = lambda ref: f'<c r="{ref}" t="b"><v></v></c>'  # noqa: E731
