@@ -1,5 +1,6 @@
 # Processamento de um arquivo completo e da pasta (secoes 6 e 7 do TRATAMENTO.R).
 import re
+import zipfile
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import Callable
 
 import openpyxl
 import pandas as pd
+from openpyxl.utils.exceptions import InvalidFileException
 
 from .cabecalhos import chave_locale, normalizar_nome, trimws, unificar_colunas
 from .config import CODIGO_UNICO, NOMES_SAIDA_LEGADOS, ORDEM_INICIAL, nome_saida
@@ -64,6 +66,15 @@ def _exatamente_uma(abas, padrao, descricao):
             f"Esperada exatamente uma aba {descricao}; encontrada(s) {len(encontradas)}."
         )
     return encontradas[0]
+
+
+def _mensagem_erro(e: Exception) -> str:
+    # Erros de abertura viram texto para o usuario; o resto segue como no R.
+    if isinstance(e, (zipfile.BadZipFile, InvalidFileException)):
+        return "Nao foi possivel abrir o arquivo: arquivo corrompido ou nao e .xlsx."
+    if isinstance(e, PermissionError):
+        return "Nao foi possivel abrir o arquivo: arquivo em uso ou sem permissao."
+    return str(e)
 
 
 def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
@@ -222,7 +233,7 @@ def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
             arquivo=arquivo,
             referencia=referencia,
             status="ERRO",
-            mensagem=str(e),
+            mensagem=_mensagem_erro(e),
             observacoes_datas=observacoes_datas,
             divergencias_datas=divergencias_datas,
         )

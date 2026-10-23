@@ -218,3 +218,30 @@ def test_c6_memoria_e_interrupcao_nao_sao_engolidas(tmp_path, monkeypatch, excec
     monkeypatch.setattr(pipeline, "escrever_excel", explode)
     with pytest.raises(excecao):
         pipeline.executar([_arquivo_ok(tmp_path)], {"123": "A"}, tmp_path / "r.xlsx")
+
+
+# C7 ------------------------------------------------------------------------
+
+@pytest.mark.parametrize("conteudo", [b"isto nao e um xlsx", b"", b"PK\x03\x04truncado"])
+def test_c7_arquivo_corrompido_tem_mensagem_em_portugues(tmp_path, conteudo):
+    from consolidacao.processamento import processar_arquivos
+
+    ruim = tmp_path / "PC123 ruim.xlsx"
+    ruim.write_bytes(conteudo)
+    c = processar_arquivos([ruim, _arquivo_ok(tmp_path)], {"123": "A"})
+    assert c.log["STATUS"].tolist() == ["ERRO", "OK"]
+    assert c.log["MENSAGEM"][0] == "Nao foi possivel abrir o arquivo: arquivo corrompido ou nao e .xlsx."
+    assert len(c.consolidado) == 4
+
+
+def test_c7_arquivo_em_uso_tem_mensagem_em_portugues(tmp_path, monkeypatch):
+    import consolidacao.processamento as processamento
+
+    def em_uso(caminho):
+        raise PermissionError(13, "Permission denied", str(caminho))
+
+    monkeypatch.setattr(processamento, "abrir_planilha", em_uso)
+    r = processamento.processar_arquivo(_arquivo_ok(tmp_path), {"123": "A"})
+    assert (r.status, r.mensagem) == (
+        "ERRO", "Nao foi possivel abrir o arquivo: arquivo em uso ou sem permissao."
+    )
