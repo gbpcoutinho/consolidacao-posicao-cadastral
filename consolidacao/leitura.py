@@ -312,6 +312,11 @@ def ler_dependente(caminho: Path, aba: str, referencia: str, wb=None) -> Resulta
             )
         # As duas linhas finais sao sintese/resumo, nao registros nem erros de layout.
         df = bruto.iloc[: len(bruto) - 2].copy()
+
+    # Linha vazia no meio continua como registro (igual ao R), mas e contada.
+    n_vazias = sum(linhas_vazias(df))
+    if n_vazias:
+        avisos_estrutura.append(f"{n_vazias} linha(s) vazia(s) em DEPENDENTES")
     regras = {
         "REATIVA": "DATA DE REATIVACAO",
         "SEXO.*DEPENDENTE": "SEXO",

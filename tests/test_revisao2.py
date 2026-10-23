@@ -538,3 +538,23 @@ def test_c3_sem_coluna_tipo_corta_como_o_r(tmp_path):
 
     r = ler_dependente(_arquivo_ok(tmp_path), "DEPENDENTE", "PC1")
     assert len(r.dados) == 2 and r.avisos_estrutura == []
+
+
+# C12 -----------------------------------------------------------------------
+
+def test_c12_linha_vazia_no_meio_dos_dependentes_fica_e_e_contada_no_log(tmp_path):
+    from consolidacao.processamento import processar_arquivo
+
+    p = tmp_path / "PC123 x.xlsx"
+    criar_arquivo_pc(p, TITULAR_OK, [DEPENDENTE_OK[0], {}, {}, DEPENDENTE_OK[1]], SUPLEMENTAR_OK)
+    r = processar_arquivo(p, {"123": "A"})
+    # Paridade: o R mantem as linhas vazias como registros (e pendencias).
+    assert r.status == "OK" and r.n_dependentes == 4 and len(r.pendencias) == 3
+    assert r.avisos.endswith("2 linha(s) vazia(s) em DEPENDENTES")
+
+
+def test_c12_sem_linha_vazia_sem_aviso(tmp_path):
+    from consolidacao.processamento import processar_arquivo
+
+    r = processar_arquivo(_arquivo_ok(tmp_path), {"123": "A"})
+    assert "vazia" not in r.avisos
