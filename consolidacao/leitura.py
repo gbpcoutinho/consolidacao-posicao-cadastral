@@ -67,8 +67,23 @@ def _valor_bruto(celula, epoch):
     return v
 
 
+class _NumeroBruto:
+    """Numero (ou data t="d") junto com o texto gravado em <v>. Em coluna texto
+    vale o texto, como no readxl ("001" continua "001"); em coluna DATA vale o
+    valor convertido."""
+
+    __slots__ = ("valor", "texto")
+
+    def __init__(self, valor, texto):
+        self.valor, self.texto = valor, texto
+
+
 def _sem_marcador(v):
     return None if v is _PRESENTE_NA else v
+
+
+def _valor(v):
+    return v.valor if isinstance(v, _NumeroBruto) else v
 
 
 def _numero_como_texto(x) -> str:
@@ -78,10 +93,12 @@ def _numero_como_texto(x) -> str:
 
 
 def _como_texto(v, epoch=WINDOWS_EPOCH):
-    # Equivalente a col_types = "text" do readxl. Data volta ao serial gravado,
-    # inclusive em pasta com data 1904.
+    # Equivalente a col_types = "text" do readxl: numero e data usam o texto
+    # bruto de <v>. Sem ele, o numero e reformatado e a data volta ao serial.
     if v is None or isinstance(v, str):
         return v
+    if isinstance(v, _NumeroBruto):
+        return v.texto
     if isinstance(v, bool):
         return "TRUE" if v else "FALSE"
     if isinstance(v, (int, float)):
@@ -164,25 +181,27 @@ def varrer_celulas(caminho: Path, aba: str):
                 elem.clear()
 
 
-def _presentes_sem_valor(caminho: Path, aba: str) -> list:
-    # O readxl conta na faixa toda celula com <f> ou <v>, mesmo sem valor
-    # (formula sem cache, <v/>). O openpyxl le essas celulas como None.
-    return [
-        (linha, coluna)
-        for linha, coluna, _, valor, formula in varrer_celulas(caminho, aba)
-        if formula or valor == ""
-    ]
-
-
-def _marcar_presentes(linhas: list, presentes: list) -> None:
-    for linha, coluna in presentes:
-        while len(linhas) < linha:
-            linhas.append([])
-        valores = linhas[linha - 1]
-        if len(valores) < coluna:
-            valores.extend([None] * (coluna - len(valores)))
-        if valores[coluna - 1] is None:
-            valores[coluna - 1] = _PRESENTE_NA
+def _aplicar_xml(linhas: list, caminho: Path, aba: str) -> None:
+    """Completa a leitura do openpyxl com o XML da aba, como faz o readxl:
+    - celula com <f> ou <v> mas sem valor (formula sem cache, <v/>) conta na
+      faixa lida; o openpyxl a le como None;
+    - numero (t="n") e data (t="d") guardam o texto bruto de <v>."""
+    for linha, coluna, tipo, bruto, formula in varrer_celulas(caminho, aba):
+        if formula and not bruto or bruto == "":
+            while len(linhas) < linha:
+                linhas.append([])
+            valores = linhas[linha - 1]
+            if len(valores) < coluna:
+                valores.extend([None] * (coluna - len(valores)))
+            if valores[coluna - 1] is None:
+                valores[coluna - 1] = _PRESENTE_NA
+        elif bruto is not None and tipo in ("n", "d"):
+            try:
+                v = linhas[linha - 1][coluna - 1]
+            except IndexError:
+                continue
+            if v is not None and v is not _PRESENTE_NA:
+                linhas[linha - 1][coluna - 1] = _NumeroBruto(v, bruto)
 
 
 def abrir_planilha(caminho: Path):
@@ -207,7 +226,7 @@ def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None) -> pd.DataFrame:
     finally:
         if proprio:
             wb.close()
-    _marcar_presentes(linhas, _presentes_sem_valor(caminho, aba))
+    _aplicar_xml(linhas, caminho, aba)
 
     # Como no readxl: o cabecalho fica na linha max(skip, 1a linha com conteudo
     # da aba inteira). Se ha conteudo antes do skip e a linha do skip esta
@@ -230,6 +249,8 @@ def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None) -> pd.DataFrame:
         valores = [l[j] for l in linhas[1:]]
         if "DATA" not in normalizar_nome(nome):
             valores = [_como_texto(v, epoch) for v in valores]
+        else:
+            valores = [_valor(v) for v in valores]
         colunas[j] = valores
 
     df = pd.DataFrame({j: pd.Series(v, dtype=object) for j, v in colunas.items()})
