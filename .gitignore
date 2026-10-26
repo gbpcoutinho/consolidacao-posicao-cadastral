@@ -10,3 +10,6 @@ COD_EMPRESAS.csv
 .Rhistory
 .Rproj.user/
 .superpowers/
+build/
+dist/
+.RData
