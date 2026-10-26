@@ -94,3 +94,8 @@ def test_base_vazia_igual_ao_gravador_anterior(tmp_path):
     b = tmp_path / "PC999 y.xlsx"
     criar_arquivo_pc(b, TITULAR_OK, DEPENDENTE_OK, SUPLEMENTAR_OK)
     _comparar(processar_arquivos([b], {"1": "A"}), tmp_path)
+
+
+def test_openpyxl_usa_lxml_para_gravar():
+    # lxml (requirements.txt) deixa a serializacao do XML ~1/3 mais rapida.
+    assert openpyxl.LXML is True
