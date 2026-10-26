@@ -47,6 +47,11 @@ aplicativo (ver `fase2-app.md`).
 - A coluna `TIPO DE REGISTRO` é removida.
 - Colunas identificadoras (`NUMERO|CODIGO|CARTAO|CERTIFICADO|SUBFATURA|CPF|MATRICULA|INSCRICAO`)
   são lidas como texto. Zeros ausentes na origem não são reconstruídos.
+- Em toda coluna sem `DATA` no nome, número e data `t="d"` ficam com o texto
+  exatamente como gravado no arquivo (`<v>`), como no readxl: "001" continua
+  "001", "1.2E3", 12345678901234567, "0.3333333333333333", "-0" e o serial de
+  uma célula com formato de data (inclusive pasta 1904) não são reformatados.
+  Lógico vira "TRUE"/"FALSE" e erro do Excel vira vazio.
 - Datas: aceitar Date nativo, serial Excel (incluindo o bug do dia 60 de 1900),
   a lista de formatos de texto do R e ano curto (00–29 vira 20xx, 30–99 vira
   19xx). Data inválida fica vazia e é registrada no log.
@@ -122,17 +127,19 @@ cache ou `<v>` vazio conta na faixa lida (varredura própria do XML da aba);
 célula só com espaços e quebras de linha vira vazio; datas de texto aceitam só
 dígitos e espaços ASCII; data em coluna texto de pasta 1904 volta ao serial
 1904; cabeçalho do TITULAR na linha max(skip, 1ª linha com conteúdo).
+Depois (2026-10-26, item P11): número em coluna texto usa o texto bruto de
+`<v>` (ver Regras de tratamento); resolve também o antigo item "números
+>= 1e16 em texto".
 
 Pendências registradas (fora desta rodada):
-- P11: em coluna texto, usar o texto bruto de `<v>` como o readxl ("001",
-  "1.2E3", números >= 1e16, células `t="d"`). `varrer_celulas()` já devolve o
-  `<v>` bruto; falta o ciclo próprio com teste de paridade.
 - N3: "00/00/0000" conta como data inválida (igual ao R).
 - N5: CSV de empresas com "," em vez de ";" dá a mensagem de colunas ausentes.
 - N6: a guarda de tipos incompatíveis entre arquivos parece inalcançável (o
   tipo vem do nome da coluna); mantida como defesa.
-- N7: desempenho (~30 s por arquivo de 24 mil linhas; a varredura do XML
-  acrescenta ~20%) e cancelamento só entre arquivos: fase 2.
+- N7: desempenho (arquivo de 24 mil linhas no formato real: 7 a 30 s conforme
+  a máquina; a varredura do XML acrescenta ~20%, e o texto bruto de `<v>` não
+  muda o tempo no formato real, que grava tudo como texto; numa aba só de
+  números, +15%) e cancelamento só entre arquivos: fase 2.
 
 ## Testes
 

@@ -137,11 +137,17 @@ def trocar_celula(caminho: Path, marcador: str, xml_celula) -> None:
         r'<c r="([A-Z]+[0-9]+)"( s="\d+")? t="inlineStr"><is><t>'
         + re.escape(marcador) + r"</t></is></c>"
     )
+
+    def _trocar(m):
+        # Mantem o estilo da celula original (ex.: formato de data).
+        ref, estilo = m.group(1), m.group(2) or ""
+        return xml_celula(ref).replace(f'<c r="{ref}"', f'<c r="{ref}"{estilo}', 1)
+
     with zipfile.ZipFile(caminho) as origem, zipfile.ZipFile(temporario, "w") as destino:
         for item in origem.infolist():
             dados = origem.read(item.filename)
             if item.filename.startswith("xl/worksheets/sheet"):
-                dados = padrao.sub(lambda m: xml_celula(m.group(1)), dados.decode("utf-8")).encode("utf-8")
+                dados = padrao.sub(_trocar, dados.decode("utf-8")).encode("utf-8")
             destino.writestr(item, dados)
     shutil.move(temporario, caminho)
 
