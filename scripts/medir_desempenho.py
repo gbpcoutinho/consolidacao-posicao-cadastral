@@ -8,7 +8,7 @@ Gera em PASTA (de preferencia fora do OneDrive) dois arquivos no formato real:
 - "real": como exemplos/gerar_exemplos.py (tudo texto);
 - "pesado": o mesmo conteudo com identificadores numericos e datas como
   datas do Excel, o que exercita o texto bruto de <v> e a conversao de datas.
-Com --perfil, imprime o top 15 do cProfile (tempo acumulado) de cada caso.
+Com --perfil, imprime o top 15 do cProfile (tempo proprio, tottime) de cada caso.
 Com --cancelar-apos, pede o cancelamento depois de N segundos e mede quanto
 tempo o motor leva para parar.
 """
@@ -74,7 +74,7 @@ def medir(caminho: Path, saida: Path, perfil: bool) -> None:
           f"gravar={fim - meio:.2f}s total={fim - inicio:.2f}s")
     if perfilador:
         texto = io.StringIO()
-        pstats.Stats(perfilador, stream=texto).sort_stats("cumulative").print_stats(15)
+        pstats.Stats(perfilador, stream=texto).sort_stats("tottime").print_stats(15)
         print(texto.getvalue())
 
 
