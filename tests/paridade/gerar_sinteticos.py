@@ -115,4 +115,23 @@ def gerar(pasta: Path) -> Path:
     dependentes_subf = [_com(d, **{"NUMERO DA SUBFATURA": "0009", "NOME DA MÃE DO DEPENDENTE": "\n"})
                         for d in DEPENDENTE_OK]
     criar_arquivo_pc(pasta / "PC456 SUBF.xlsx", titulares_subf, dependentes_subf, SUPLEMENTAR_OK)
+
+    # P11: numeros gravados por exportador nao-Excel; coluna texto usa o <v> bruto.
+    brutos = {
+        "__CERT001__": '<v>001</v>', "__EXP__": '<v>1.2E3</v>', "__GRANDE__": '<v>12345678901234567</v>',
+        "__DECIMAL__": '<v>0.3333333333333333</v>', "__DECIMAL2__": '<v>99999999.98999999</v>',
+        "__MENOS0__": '<v>-0</v>', "__SERIAL60__": '<v>60</v>',
+    }
+    titulares_brutos = [
+        _com(TITULAR_OK[0], **{"NUMERO DO CERTIFICADO": "__CERT001__", "NUMERO DA SUBFATURA": "__EXP__",
+                               "NUMERO DO CPF": "__GRANDE__", "REGIÃO": "__DECIMAL__",
+                               "SEXO DO SEGURADO": "__ISO__", "DATA DE NASCIMENTO": "__ISO__"}),
+        _com(TITULAR_OK[1], **{"NUMERO DO CPF": "__DECIMAL2__", "REGIÃO": "__MENOS0__",
+                               "SEXO DO SEGURADO": "__SERIAL60__"}),
+    ]
+    p = pasta / "PC456 TEXTO BRUTO.xlsx"
+    criar_arquivo_pc(p, titulares_brutos, DEPENDENTE_OK, SUPLEMENTAR_OK)
+    for marcador, v in brutos.items():
+        trocar_celula(p, marcador, lambda ref, v=v: f'<c r="{ref}">{v}</c>')
+    trocar_celula(p, "__ISO__", lambda ref: f'<c r="{ref}" t="d"><v>2023-03-15T00:00:00</v></c>')
     return pasta
