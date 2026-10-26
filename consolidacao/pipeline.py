@@ -39,6 +39,52 @@ def _validar_saida(saida: Path, arquivos: list, arquivo_empresas: Path | None) -
         )
 
 
+def _protegido(funcao, *args, **kwargs):
+    """Erro inesperado vira ErroValidacao (a original fica em __cause__);
+    ProcessamentoCancelado e MemoryError passam direto. KeyboardInterrupt nao
+    e Exception e tambem passa."""
+    try:
+        return funcao(*args, **kwargs)
+    except (ErroValidacao, ProcessamentoCancelado, MemoryError):
+        raise
+    except Exception as e:
+        raise ErroValidacao(
+            f"Erro inesperado ao gerar a consolidacao ({type(e).__name__}: {e})."
+        ) from e
+
+
+def processar(
+    arquivos: list,
+    mapa: dict,
+    progresso: Callable[[int, int, str], None] | None = None,
+    cancelar: Callable[[], bool] | None = None,
+) -> Consolidado:
+    """Processa os arquivos sem gravar nada.
+
+    progresso(i, total, nome) e chamado antes de cada arquivo; cancelar() True
+    interrompe com ProcessamentoCancelado."""
+    return _protegido(processar_arquivos, arquivos, mapa, progresso=progresso, cancelar=cancelar)
+
+
+def _gravar(resultado, saida, arquivos, arquivo_empresas, progresso) -> None:
+    _validar_saida(saida, arquivos, arquivo_empresas)
+    total = len(arquivos)
+    avisar_progresso(progresso, total, total, ETAPA_GRAVACAO)
+    escrever_excel(resultado, saida)
+
+
+def gravar(
+    resultado: Consolidado,
+    saida: Path,
+    arquivos: list,
+    arquivo_empresas: Path | None = None,
+    progresso: Callable[[int, int, str], None] | None = None,
+) -> None:
+    """Grava o Excel consolidado em `saida`, com as mesmas validacoes de saida
+    de executar. progresso recebe (total, total, ETAPA_GRAVACAO)."""
+    _protegido(_gravar, resultado, Path(saida), arquivos, arquivo_empresas, progresso)
+
+
 def executar(
     arquivos: list,
     mapa: dict,
@@ -54,19 +100,10 @@ def executar(
     para falhas inesperadas, com a original em __cause__), ProcessamentoCancelado
     e MemoryError."""
     saida = Path(saida)
-    try:
-        _validar_saida(saida, arquivos, arquivo_empresas)
-        resultado = processar_arquivos(arquivos, mapa, progresso=progresso, cancelar=cancelar)
-        total = len(arquivos)
-        avisar_progresso(progresso, total, total, ETAPA_GRAVACAO)
-        escrever_excel(resultado, saida)
-    except (ErroValidacao, ProcessamentoCancelado, MemoryError):
-        raise
-    except Exception as e:
-        # KeyboardInterrupt nao e Exception e continua passando direto.
-        raise ErroValidacao(
-            f"Erro inesperado ao gerar a consolidacao ({type(e).__name__}: {e})."
-        ) from e
+    # Valida antes de processar: nao vale gastar minutos para recusar a saida.
+    _protegido(_validar_saida, saida, arquivos, arquivo_empresas)
+    resultado = processar(arquivos, mapa, progresso=progresso, cancelar=cancelar)
+    gravar(resultado, saida, arquivos, arquivo_empresas=arquivo_empresas, progresso=progresso)
     return resultado
 
 
