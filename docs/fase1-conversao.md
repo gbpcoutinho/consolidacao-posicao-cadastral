@@ -93,6 +93,47 @@ Além disso, um resumo é impresso no console.
   largura necessária para o cabeçalho caber em até 2 linhas, com mínimo de 13
   (pedido do usuário em 2026-10-22).
 
+Revisão por 5 agentes (rodada 2, 2026-10-23). Desvios que protegem dados:
+- **Linhas finais de DEPENDENTES**: o R sempre remove as 2 últimas linhas. O
+  Python só remove se a aba tiver a coluna `TIPO DE REGISTRO` e a última linha
+  tiver o valor `4` (o resumo do formato real). Com a coluna e outro valor, nada
+  é removido e o Log avisa ("ultima linha sem TIPO DE REGISTRO 4"). Sem a
+  coluna, remove como o R.
+- **Avisos que o R não grava** (sempre no fim de `AVISOS_ESTRUTURA`): linhas
+  vazias no meio de DEPENDENTES (os registros continuam, como no R) e mesma
+  `REFERENCIA` ou `CODIGO_EMPRESA` em mais de um arquivo (aviso, não erro). A
+  paridade ignora só esses textos (`tests/paridade/comparar.py`).
+- **Saída igual a uma entrada ou ao CSV de empresas**: recusada antes de
+  processar (o R sobrescreveria a planilha).
+- **Mais de 1.048.575 linhas numa aba**: recusado antes de gravar.
+- **Erros de abertura no Log** em português: "arquivo corrompido ou nao e
+  .xlsx" e "arquivo em uso ou sem permissao" (o R mostra a mensagem do readxl).
+
+Diferenças conhecidas e aceitas:
+- Data com ano `0000` (ex.: "01/01/0000" ou o serial-texto "11060"): o R cria
+  o ano 0; o Python deixa vazio e registra no Log (o ano 0 não existe em
+  `datetime.date`).
+- CR literal dentro de texto (gerado fora do Excel): o readxl mantém `\r\n`; o
+  parser do openpyxl entrega `\n`. As chaves são aparadas, então as junções
+  não mudam.
+
+Alinhado ao R nesta rodada (antes divergia): célula com fórmula sem valor em
+cache ou `<v>` vazio conta na faixa lida (varredura própria do XML da aba);
+célula só com espaços e quebras de linha vira vazio; datas de texto aceitam só
+dígitos e espaços ASCII; data em coluna texto de pasta 1904 volta ao serial
+1904; cabeçalho do TITULAR na linha max(skip, 1ª linha com conteúdo).
+
+Pendências registradas (fora desta rodada):
+- P11: em coluna texto, usar o texto bruto de `<v>` como o readxl ("001",
+  "1.2E3", números >= 1e16, células `t="d"`). `varrer_celulas()` já devolve o
+  `<v>` bruto; falta o ciclo próprio com teste de paridade.
+- N3: "00/00/0000" conta como data inválida (igual ao R).
+- N5: CSV de empresas com "," em vez de ";" dá a mensagem de colunas ausentes.
+- N6: a guarda de tipos incompatíveis entre arquivos parece inalcançável (o
+  tipo vem do nome da coluna); mantida como defesa.
+- N7: desempenho (~30 s por arquivo de 24 mil linhas; a varredura do XML
+  acrescenta ~20%) e cancelamento só entre arquivos: fase 2.
+
 ## Testes
 
 1. **Testes automáticos com planilhas sintéticas** (dados falsos, gerados pelos
