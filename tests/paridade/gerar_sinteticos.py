@@ -5,12 +5,14 @@ from pathlib import Path
 import openpyxl
 
 from tests.fabrica import (
+    FORMULA_TEXTO_CACHE_VAZIO,
     DEPENDENTE_OK,
     SUPLEMENTAR_OK,
     TITULAR_OK,
     criar_arquivo_pc,
     escrever_csv_empresas,
     forcar_dimensao,
+    trocar_celula,
 )
 
 
@@ -83,4 +85,34 @@ def gerar(pasta: Path) -> Path:
     wb = openpyxl.load_workbook(p)
     wb["DEPENDENTE"].append([" "])
     wb.save(p)
+
+    # Revisao 2 (C2, C8, C11, C14): casos conferidos com o R.
+    p = pasta / "PC123 TOTAL FORMULA.xlsx"
+    criar_arquivo_pc(p, TITULAR_OK, DEPENDENTE_OK, SUPLEMENTAR_OK)
+    wb = openpyxl.load_workbook(p)
+    ws = wb["DEPENDENTE"]
+    ws.cell(ws.max_row, 1).value = "=COUNTA(A2:A3)"  # gravado sem valor em cache
+    wb.save(p)
+
+    p = pasta / "PC123 TITULAR FORMULA VAZIA.xlsx"
+    criar_arquivo_pc(p, TITULAR_OK, DEPENDENTE_OK, SUPLEMENTAR_OK)
+    wb = openpyxl.load_workbook(p)
+    ws = wb["TITULAR"]
+    ws.cell(ws.max_row + 1, 1, "__E__")
+    wb.save(p)
+    trocar_celula(p, "__E__", FORMULA_TEXTO_CACHE_VAZIO)
+
+    p = pasta / "PC123 TITULAR LINHA 3 VAZIA.xlsx"
+    criar_arquivo_pc(p, TITULAR_OK, DEPENDENTE_OK, SUPLEMENTAR_OK)
+    wb = openpyxl.load_workbook(p)
+    wb["TITULAR"].cell(2, 1, "LINHA 2")
+    wb["TITULAR"].insert_rows(3)
+    wb.save(p)
+
+    titulares_subf = [_com(TITULAR_OK[0], **{"NUMERO DA SUBFATURA": "0002"}),
+                      _com(TITULAR_OK[1], **{"NUMERO DA SUBFATURA": "0001"})]
+    # NOME DA MAE so com quebra de linha: NA nos dois (C8).
+    dependentes_subf = [_com(d, **{"NUMERO DA SUBFATURA": "0009", "NOME DA MÃE DO DEPENDENTE": "\n"})
+                        for d in DEPENDENTE_OK]
+    criar_arquivo_pc(pasta / "PC456 SUBF.xlsx", titulares_subf, dependentes_subf, SUPLEMENTAR_OK)
     return pasta
