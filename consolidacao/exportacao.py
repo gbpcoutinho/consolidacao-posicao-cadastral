@@ -18,6 +18,15 @@ from .erros import ErroValidacao
 # O Excel aceita ate 255; textos longos ficam legiveis com quebra a partir daqui.
 LARGURA_AUTO_MAXIMA = 100
 
+# O Excel tem 1.048.576 linhas por aba; a primeira e o cabecalho.
+MAXIMO_LINHAS_DADOS = 1_048_575
+
+ABAS_SAIDA = [
+    ("consolidado", "Base Tratada", "TabelaBaseTratada"),
+    ("pendencias", "Pendencias", "TabelaPendencias"),
+    ("log", "Log", "TabelaLog"),
+]
+
 COLUNAS_CENTRALIZADAS = [
     "EMPRESA", "SubF", "NUMERO DO CERTIFICADO", CODIGO_UNICO,
     "TITULARIDADE", "NUMERO DO CARTAO", "PLANO", "REGIAO",
@@ -147,28 +156,47 @@ def adicionar_aba_formatada(wb, df: pd.DataFrame, nome_aba: str, nome_tabela: st
     ws.freeze_panes = "A2"
 
 
+def validar_limite_linhas(c) -> None:
+    """Acima do limite o Excel abre o arquivo pedindo reparo e perde linhas."""
+    for atributo, nome_aba, _ in ABAS_SAIDA:
+        n = len(getattr(c, atributo))
+        if n > MAXIMO_LINHAS_DADOS:
+            raise ErroValidacao(
+                f"A aba '{nome_aba}' teria {n:,} linhas de dados; o Excel aceita no maximo "
+                f"{MAXIMO_LINHAS_DADOS:,}. Processe os arquivos em lotes menores.".replace(",", ".")
+            )
+
+
 def escrever_excel(c, destino: Path) -> None:
+    validar_limite_linhas(c)
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
-    adicionar_aba_formatada(wb, c.consolidado, "Base Tratada", "TabelaBaseTratada")
-    adicionar_aba_formatada(wb, c.pendencias, "Pendencias", "TabelaPendencias")
-    adicionar_aba_formatada(wb, c.log, "Log", "TabelaLog")
+    for atributo, nome_aba, nome_tabela in ABAS_SAIDA:
+        adicionar_aba_formatada(wb, getattr(c, atributo), nome_aba, nome_tabela)
 
     # Grava num temporario na mesma pasta e so entao troca: se o destino estiver
     # aberto no Excel, o arquivo anterior fica intacto e o erro e claro.
+    # Prefixo "~$": se o temporario sobrar (processo morto), a listagem de
+    # entradas do R e do Python ja o ignora, como os arquivos de bloqueio do Excel.
     destino = Path(destino)
     temporario = None
     try:
         destino.parent.mkdir(parents=True, exist_ok=True)
-        descritor, nome = tempfile.mkstemp(dir=destino.parent, prefix="~", suffix=".xlsx")
+        descritor, nome = tempfile.mkstemp(dir=destino.parent, prefix="~$", suffix=".xlsx")
         os.close(descritor)
         temporario = Path(nome)
         wb.save(temporario)
         os.replace(temporario, destino)
+        temporario = None
     except OSError as e:
-        if temporario is not None and temporario.exists():
-            temporario.unlink()
         raise ErroValidacao(
             f"Nao foi possivel salvar o arquivo de saida '{destino}': feche o arquivo "
             f"se estiver aberto no Excel e tente novamente. ({e})"
         ) from e
+    finally:
+        # Qualquer falha (inclusive fora de OSError) nao deixa o temporario na pasta.
+        if temporario is not None:
+            try:
+                temporario.unlink(missing_ok=True)
+            except OSError:
+                pass  # nao esconde o erro original

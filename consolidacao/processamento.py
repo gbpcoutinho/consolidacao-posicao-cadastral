@@ -1,5 +1,6 @@
 # Processamento de um arquivo completo e da pasta (secoes 6 e 7 do TRATAMENTO.R).
 import re
+import zipfile
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import Callable
 
 import openpyxl
 import pandas as pd
+from openpyxl.utils.exceptions import InvalidFileException
 
 from .cabecalhos import chave_locale, normalizar_nome, trimws, unificar_colunas
 from .config import CODIGO_UNICO, NOMES_SAIDA_LEGADOS, ORDEM_INICIAL, nome_saida
@@ -64,6 +66,15 @@ def _exatamente_uma(abas, padrao, descricao):
             f"Esperada exatamente uma aba {descricao}; encontrada(s) {len(encontradas)}."
         )
     return encontradas[0]
+
+
+def _mensagem_erro(e: Exception) -> str:
+    # Erros de abertura viram texto para o usuario; o resto segue como no R.
+    if isinstance(e, (zipfile.BadZipFile, InvalidFileException)):
+        return "Nao foi possivel abrir o arquivo: arquivo corrompido ou nao e .xlsx."
+    if isinstance(e, PermissionError):
+        return "Nao foi possivel abrir o arquivo: arquivo em uso ou sem permissao."
+    return str(e)
 
 
 def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
@@ -201,6 +212,8 @@ def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
             avisos.append(f"Titulares sem CARTAO apos a juncao: {titulares_sem_cartao}")
         if titulares_sem_nome_mae > 0:
             avisos.append(f"Titulares sem NOME DA MAE apos a juncao: {titulares_sem_nome_mae}")
+        # Avisos que o R nao tem (desvios protetores) ficam sempre no fim.
+        avisos += dependente_info.avisos_estrutura
 
         return ResultadoArquivo(
             arquivo=arquivo,
@@ -222,7 +235,7 @@ def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
             arquivo=arquivo,
             referencia=referencia,
             status="ERRO",
-            mensagem=str(e),
+            mensagem=_mensagem_erro(e),
             observacoes_datas=observacoes_datas,
             divergencias_datas=divergencias_datas,
         )
@@ -315,6 +328,34 @@ def _ordenar(df: pd.DataFrame, colunas: list) -> pd.DataFrame:
     return df.iloc[linhas].reset_index(drop=True)
 
 
+def avisar_progresso(progresso, i: int, total: int, nome: str) -> None:
+    """Chama o callback da interface; um defeito nele nao derruba o processamento.
+    ProcessamentoCancelado levantado pelo callback continua cancelando."""
+    if not progresso:
+        return
+    try:
+        progresso(i, total, nome)
+    except ProcessamentoCancelado:
+        raise
+    except Exception:
+        pass
+
+
+def _avisar_repetidos(aceitos: list) -> None:
+    """Mesma empresa em mais de um arquivo (copia esquecida, reenvio "v2")
+    duplicaria registros em silencio. O R nao avisa; aqui vira aviso, nao erro."""
+    for r in aceitos:
+        outros = [o for o in aceitos if o is not r and o.codigo_empresa == r.codigo_empresa]
+        if not outros:
+            continue
+        nomes = ", ".join(o.arquivo for o in outros)
+        if any(o.referencia.casefold() == r.referencia.casefold() for o in outros):
+            aviso = f"REFERENCIA '{r.referencia}' repetida em outro(s) arquivo(s): {nomes}"
+        else:
+            aviso = f"CODIGO_EMPRESA '{r.codigo_empresa}' repetido em outro(s) arquivo(s): {nomes}"
+        r.avisos = f"{r.avisos} | {aviso}" if r.avisos else aviso
+
+
 def processar_arquivos(
     caminhos: list,
     mapa: dict,
@@ -329,8 +370,7 @@ def processar_arquivos(
     for i, caminho in enumerate(caminhos, start=1):
         if cancelar and cancelar():
             raise ProcessamentoCancelado("Processamento cancelado pelo usuario.")
-        if progresso:
-            progresso(i, total, Path(caminho).name)
+        avisar_progresso(progresso, i, total, Path(caminho).name)
         resultados.append(processar_arquivo(caminho, mapa))
 
     # Adiciona um arquivo por vez para registrar no log uma eventual incompatibilidade.
@@ -352,6 +392,8 @@ def processar_arquivos(
             if tipo:
                 tipos_acumulados.setdefault(coluna, tipo)
         aceitos.append(r)
+
+    _avisar_repetidos(aceitos)
 
     if aceitos:
         consolidado = _bind_rows([r.final for r in aceitos])

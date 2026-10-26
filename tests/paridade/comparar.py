@@ -1,4 +1,5 @@
 """Compara duas planilhas de saida celula a celula (valores e formato de data)."""
+import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -13,6 +14,23 @@ def _normalizar(v):
     if v == "":
         return None
     return v
+
+
+# Avisos que so o Python grava em AVISOS_ESTRUTURA (desvios protetores
+# documentados em docs/fase1-conversao.md). Todo o resto do Log e comparado.
+AVISOS_SO_PYTHON = [
+    re.compile(r"^CODIGO_EMPRESA '.*' repetido em outro\(s\) arquivo\(s\): "),
+    re.compile(r"^REFERENCIA '.*' repetida em outro\(s\) arquivo\(s\): "),
+    re.compile(r"^[0-9]+ linha\(s\) vazia\(s\) em DEPENDENTES$"),
+    re.compile(r"^DEPENDENTE: ultima linha sem TIPO DE REGISTRO 4 \(resumo\); nenhuma linha removida$"),
+]
+
+
+def sem_avisos_so_python(texto):
+    if texto is None:
+        return None
+    itens = [a for a in texto.split(" | ") if not any(p.match(a) for p in AVISOS_SO_PYTHON)]
+    return " | ".join(itens) or None
 
 
 def _linhas(ws):
@@ -60,6 +78,8 @@ def _comparar(wa, wb, max_difs: int) -> list:
                 cb = rb[j] if j < len(rb) else None
                 va = _normalizar(ca.value if ca is not None else None)
                 vb = _normalizar(cb.value if cb is not None else None)
+                if nome == "Log" and coluna == "AVISOS_ESTRUTURA":
+                    vb = sem_avisos_so_python(vb)
                 if va != vb:
                     difs.append(f"[{nome}] linha {i} coluna '{coluna}': R={va!r} Py={vb!r}")
                 elif isinstance(va, date) and ca.number_format != cb.number_format:

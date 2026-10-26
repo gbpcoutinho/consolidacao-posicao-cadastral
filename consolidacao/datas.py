@@ -77,7 +77,9 @@ def _regex_formato(formato: str):
             else:
                 partes.append(re.escape(c))
                 i += 1
-        _CACHE_FORMATOS[formato] = (re.compile("".join(partes)), campos)
+        # re.ASCII: como o strptime do R, digitos e espacos Unicode (largura
+        # total, NBSP) nao valem.
+        _CACHE_FORMATOS[formato] = (re.compile("".join(partes), re.ASCII), campos)
     return _CACHE_FORMATOS[formato]
 
 
