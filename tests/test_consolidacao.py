@@ -54,3 +54,12 @@ def test_processar_arquivos_todos_com_erro(tmp_path):
     c = processar_arquivos([b], {"1": "A"})
     assert len(c.consolidado) == 0 and "CÓDIGO UNICO" in c.consolidado.columns
     assert list(c.pendencias.columns)[-1] == "MOTIVO"
+    from consolidacao.processamento import COLUNAS_PENDENCIAS
+    # Base vazia sai com as colunas na ORDEM_INICIAL, como no R.
+    assert list(c.consolidado.columns) == ORDEM_INICIAL
+    assert list(c.pendencias.columns) == COLUNAS_PENDENCIAS and len(c.pendencias) == 0
+    assert len(c.log) == 1
+    assert c.log.iloc[0][["STATUS", "TITULARES", "DEPENDENTES"]].tolist() == ["ERRO", None, None]
+    assert c.log["MENSAGEM"][0] == (
+        "Codigo '999' extraido de 'PC999' nao encontrado em COD_SAUDE no COD_EMPRESAS.csv."
+    )

@@ -29,6 +29,18 @@ def test_excel_formatado(tmp_path):
     assert ws[f'{col["PLANO"]}2'].alignment.horizontal == "center"
     log = wb["Log"]
     assert [c.value for c in log[1]][:3] == ["ARQUIVO", "REFERENCIA", "CODIGO_EMPRESA"]
+    # Conteudo e contagem, nao so formato.
+    assert ws.max_row == 5 and wb["Pendencias"].max_row == 2 and log.max_row == 2
+    assert [ws[f'{col["NUMERO DO CERTIFICADO"]}{i}'].value for i in range(2, 6)] == ["001", "001", "002", "999"]
+    assert [ws[f'{col["TITULARIDADE"]}{i}'].value for i in range(2, 6)] == [
+        "TITULAR", "DEPENDENTE", "TITULAR", "DEPENDENTE"
+    ]
+    assert {ws[f'{col["EMPRESA"]}{i}'].value for i in range(2, 6)} == {"ACME"}
+    pend = {c.value: c.column_letter for c in wb["Pendencias"][1]}
+    assert wb["Pendencias"][f'{pend["NOME DEPENDENTE"]}2'].value == "DORA SEM TITULAR"
+    status = {c.value: c.column_letter for c in log[1]}
+    assert (log[f'{status["STATUS"]}2'].value, log[f'{status["TITULARES"]}2'].value,
+            log[f'{status["DEPENDENTES"]}2'].value) == ("OK", 2, 2)
 
 
 def test_largura_de_data_cabe_o_cabecalho_em_duas_linhas():

@@ -609,3 +609,119 @@ def test_c13_paridade_ignora_so_os_avisos_que_o_r_nao_tem():
     assert sem_avisos_so_python("Titulares sem CARTAO apos a juncao: 1") == (
         "Titulares sem CARTAO apos a juncao: 1"
     )
+
+
+# C14 -----------------------------------------------------------------------
+
+def test_c14_celula_com_erro_do_excel_vira_none(tmp_path):
+    from consolidacao.leitura import ler_aba
+
+    p = tmp_path / "x.xlsx"
+    _planilha_com_marcador(p, [["A", "B"], ["1", "__E__"], ["2", "x"]],
+                           lambda ref: f'<c r="{ref}" t="e"><v>#N/A</v></c>')
+    assert ler_aba(p, "A")["B"].tolist() == [None, "x"]
+
+
+def test_c14_suplementar_sem_certificado_e_erro(tmp_path):
+    from consolidacao.leitura import ler_suplementar
+    from tests.fabrica import ABA_SUPLEMENTAR
+
+    sup = SUPLEMENTAR_OK + [{"NUMERO DO CERTIFICADO": None, "CARTÃO": "C9", "NOME DA MÃE": "M"}]
+    p = tmp_path / "PC1.xlsx"
+    criar_arquivo_pc(p, TITULAR_OK, DEPENDENTE_OK, sup)
+    with pytest.raises(ErroValidacao, match=r"\[POS. CADASTRAL \(NOME M E\): PC1\] Ha registro suplementar sem NUMERO DO CERTIFICADO."):
+        ler_suplementar(p, ABA_SUPLEMENTAR, "PC1")
+
+
+@pytest.mark.parametrize("valor", [None, " "])
+def test_c14_aba_suplementar_sem_registros_e_erro(tmp_path, valor):
+    from consolidacao.leitura import ler_suplementar
+    from tests.fabrica import ABA_SUPLEMENTAR
+
+    sup = [{"NUMERO DO CERTIFICADO": valor, "CARTÃO": valor, "NOME DA MÃE": valor}]
+    p = tmp_path / "PC1.xlsx"
+    criar_arquivo_pc(p, TITULAR_OK, DEPENDENTE_OK, sup)
+    with pytest.raises(ErroValidacao, match="A aba suplementar nao contem registros."):
+        ler_suplementar(p, ABA_SUPLEMENTAR, "PC1")
+
+
+def test_c14_duas_colunas_de_data_para_a_mesma_y2k_e_erro():
+    import pandas as pd
+
+    from consolidacao.datas import validar_colunas_data
+
+    df = pd.DataFrame({
+        "DATA DE NASCIMENTO": ["01/01/1990"],
+        "DATA DE NASCIMENTO.": ["01/01/1990"],
+        "DATA DE NASCIMENTO (Y2K)": ["01/01/1990"],
+    }, dtype=object)
+    with pytest.raises(ErroValidacao, match=r"\[C\] Mais de uma coluna de data corresponde a 'DATA DE NASCIMENTO \(Y2K\)'."):
+        validar_colunas_data(df, "C")
+
+
+def test_c14_csv_sem_pares_validos_e_erro(tmp_path):
+    from consolidacao.empresas import carregar_mapa_empresas
+
+    p = tmp_path / "e.csv"
+    p.write_bytes(b"EMPRESA;COD_SAUDE\n;1\nNA;2\nA;\n")
+    with pytest.raises(ErroValidacao, match="O COD_EMPRESAS.csv nao tem pares EMPRESA/COD_SAUDE validos."):
+        carregar_mapa_empresas(p)
+
+
+def _arquivo_subf(pasta):
+    p = pasta / "PC123 subf.xlsx"
+    tit = [dict(TITULAR_OK[0], **{"NUMERO DA SUBFATURA": "0002"}),
+           dict(TITULAR_OK[1], **{"NUMERO DA SUBFATURA": "0001"})]
+    dep = [dict(d, **{"NUMERO DA SUBFATURA": "0009"}) for d in DEPENDENTE_OK]
+    criar_arquivo_pc(p, tit, dep, SUPLEMENTAR_OK)
+    return p
+
+
+def test_c14_subfatura_do_dependente_e_fallback_do_titular(tmp_path):
+    from consolidacao.processamento import processar_arquivo
+
+    r = processar_arquivo(_arquivo_subf(tmp_path), {"123": "A"})
+    dep = r.final[r.final["TITULARIDADE"] == "DEPENDENTE"]
+    # Com titular, vale a do titular; sem titular, a do proprio dependente (coalesce do R).
+    assert dep["SubF"].tolist() == ["0002", "0009"]
+    assert r.pendencias["NUMERO DA SUBFATURA"].tolist() == ["0009"]
+    assert ".SUBF_DEPENDENTE" not in r.final.columns
+
+
+def test_c14_base_ordenada_por_referencia_subf_e_certificado(tmp_path):
+    from consolidacao.processamento import processar_arquivos
+
+    c = processar_arquivos([_arquivo_subf(tmp_path)], {"123": "A"})
+    assert c.consolidado["SubF"].tolist() == ["0001", "0002", "0002", "0009"]
+    assert c.consolidado["NUMERO DO CERTIFICADO"].tolist() == ["002", "001", "001", "999"]
+
+
+def test_c14_aba_sem_colunas_nao_e_exportada():
+    import openpyxl
+    import pandas as pd
+
+    from consolidacao.exportacao import adicionar_aba_formatada
+
+    with pytest.raises(ValueError, match="A aba 'X' nao tem colunas para exportar."):
+        adicionar_aba_formatada(openpyxl.Workbook(), pd.DataFrame(), "X", "T")
+
+
+@pytest.mark.parametrize("x, texto", [
+    # Valores conferidos com format(x, scientific = FALSE, trim = TRUE) do R 4.6.1.
+    (1234.5678, "1234.568"), (0.000123456789, "0.0001234568"), (12345678.9, "12345679"),
+    (5.0, "5"), (0.5, "0.5"), (-1.25, "-1.25"), (1 / 3, "0.3333333"),
+    (float("inf"), "Inf"), (float("-inf"), "-Inf"), (float("nan"), "NaN"),
+    (99999999.98999999, "100000000"),
+])
+def test_c14_formatar_numero_como_o_r(x, texto):
+    from consolidacao.datas import _formatar_numero_r
+
+    assert _formatar_numero_r(x) == texto
+
+
+def test_c14_logico_vira_true_false():
+    from consolidacao.datas import texto_celula
+    from consolidacao.leitura import _como_texto
+
+    assert [texto_celula(True), texto_celula(False)] == ["TRUE", "FALSE"]
+    assert [_como_texto(True), _como_texto(False)] == ["TRUE", "FALSE"]
