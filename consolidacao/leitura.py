@@ -28,7 +28,7 @@ from .config import (
     COLUNAS_OPCIONAIS_TITULAR,
 )
 from .datas import texto_celula, validar_colunas_data
-from .erros import ErroValidacao
+from .erros import ErroValidacao, verificar_cancelamento
 
 
 @dataclass
@@ -204,12 +204,16 @@ def _aplicar_xml(linhas: list, caminho: Path, aba: str) -> None:
                 linhas[linha - 1][coluna - 1] = _NumeroBruto(v, bruto)
 
 
+# De quantas em quantas linhas a leitura de uma aba consulta o Cancelar.
+LINHAS_ENTRE_CONSULTAS = 2000
+
+
 def abrir_planilha(caminho: Path):
     """Abre o arquivo uma vez para ler todas as abas (feche com .close())."""
     return openpyxl.load_workbook(caminho, read_only=True, data_only=True)
 
 
-def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None) -> pd.DataFrame:
+def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None, cancelar=None) -> pd.DataFrame:
     proprio = wb is None
     if proprio:
         wb = abrir_planilha(caminho)
@@ -222,10 +226,17 @@ def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None) -> pd.DataFrame:
         wb._date_formats = set()
         wb._timedelta_formats = set()
         epoch = wb.epoch
-        linhas = [[_valor_bruto(c, epoch) for c in linha] for linha in ws.iter_rows()]
+        linhas = []
+        for i, linha in enumerate(ws.iter_rows()):
+            # A leitura de uma aba grande leva segundos: o Cancelar e
+            # consultado a cada bloco de linhas.
+            if i % LINHAS_ENTRE_CONSULTAS == 0:
+                verificar_cancelamento(cancelar)
+            linhas.append([_valor_bruto(c, epoch) for c in linha])
     finally:
         if proprio:
             wb.close()
+    verificar_cancelamento(cancelar)
     _aplicar_xml(linhas, caminho, aba)
 
     # Como no readxl: o cabecalho fica na linha max(skip, 1a linha com conteudo
@@ -266,9 +277,9 @@ def _adicionar_coluna(df: pd.DataFrame, nome: str, valores) -> None:
     df[nome] = pd.Series(list(valores), index=df.index, dtype=object)
 
 
-def ler_titular(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
+def ler_titular(caminho: Path, aba: str, referencia: str, wb=None, cancelar=None) -> ResultadoAba:
     contexto = f"TITULAR: {referencia}"
-    df = ler_aba(caminho, aba, skip=2, wb=wb)
+    df = ler_aba(caminho, aba, skip=2, wb=wb, cancelar=cancelar)
     regras = {
         "REATIVA": "DATA DE REATIVACAO",
         "REGI.O": "REGIAO",
@@ -277,6 +288,7 @@ def ler_titular(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoA
     }
     df = renomear_e_validar_cabecalhos(df, regras, contexto)
     df = validar_identificadores_como_texto(df, contexto)
+    verificar_cancelamento(cancelar)
     df, observacoes, divergencias = validar_colunas_data(df, contexto)
     validar_colunas(df, COLUNAS_OBRIGATORIAS_TITULAR, contexto)
 
@@ -315,9 +327,9 @@ def _sem_linha_de_resumo(bruto: pd.DataFrame) -> bool:
     return ultimo is None or trimws(str(ultimo)) != "4"
 
 
-def ler_dependente(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
+def ler_dependente(caminho: Path, aba: str, referencia: str, wb=None, cancelar=None) -> ResultadoAba:
     contexto = f"DEPENDENTE: {referencia}"
-    bruto = ler_aba(caminho, aba, skip=0, wb=wb)
+    bruto = ler_aba(caminho, aba, skip=0, wb=wb, cancelar=cancelar)
     avisos_estrutura = []
 
     if _sem_linha_de_resumo(bruto):
@@ -347,6 +359,7 @@ def ler_dependente(caminho: Path, aba: str, referencia: str, wb=None) -> Resulta
     }
     df = renomear_e_validar_cabecalhos(df, regras, contexto)
     df = validar_identificadores_como_texto(df, contexto)
+    verificar_cancelamento(cancelar)
     df, observacoes, divergencias = validar_colunas_data(df, contexto)
     validar_colunas(df, COLUNAS_OBRIGATORIAS_DEPENDENTE, contexto)
 
@@ -427,11 +440,12 @@ def agregar_aba_suplementar(df: pd.DataFrame, contexto: str) -> pd.DataFrame:
     return pd.DataFrame(linhas, columns=[".CHAVE_CERTIFICADO", ".CARTAO_SUP", ".NOME_MAE_SUP"], dtype=object)
 
 
-def ler_suplementar(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
+def ler_suplementar(caminho: Path, aba: str, referencia: str, wb=None, cancelar=None) -> ResultadoAba:
     contexto = f"POS. CADASTRAL (NOME M E): {referencia}"
-    df = ler_aba(caminho, aba, skip=0, wb=wb)
+    df = ler_aba(caminho, aba, skip=0, wb=wb, cancelar=cancelar)
     regras = {"^CART.?O$": "CARTAO", "^NOME_DA_M.?E$": "NOME DA MAE"}
     df = renomear_e_validar_cabecalhos(df, regras, contexto)
+    verificar_cancelamento(cancelar)
     df, observacoes, divergencias = validar_colunas_data(df, contexto)
     agregado = agregar_aba_suplementar(df, contexto)
     return ResultadoAba(

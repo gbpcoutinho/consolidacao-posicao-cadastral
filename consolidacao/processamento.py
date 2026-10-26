@@ -14,7 +14,7 @@ from .cabecalhos import chave_locale, normalizar_nome, trimws, unificar_colunas
 from .config import CODIGO_UNICO, NOMES_SAIDA_LEGADOS, ORDEM_INICIAL, nome_saida
 from .datas import resumir_observacoes_datas
 from .empresas import empresa_da_referencia
-from .erros import ErroValidacao, ProcessamentoCancelado
+from .erros import ErroValidacao, ProcessamentoCancelado, verificar_cancelamento
 from .leitura import abrir_planilha, ler_dependente, ler_suplementar, ler_titular
 
 COLUNAS_PENDENCIAS = [
@@ -77,7 +77,9 @@ def _mensagem_erro(e: Exception) -> str:
     return str(e)
 
 
-def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
+def processar_arquivo(caminho: Path, mapa: dict, cancelar=None) -> ResultadoArquivo:
+    """cancelar() e consultado entre as etapas (leitura de cada aba, datas,
+    juncao); True interrompe com ProcessamentoCancelado, nunca com ERRO no log."""
     caminho = Path(caminho)
     arquivo = caminho.name
     referencia = caminho.stem
@@ -97,16 +99,24 @@ def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
         )
 
         # As observacoes so entram depois que cada leitor termina, como no R.
-        titular_info = ler_titular(caminho, aba_titular, referencia, wb=wb)
+        verificar_cancelamento(cancelar)
+        titular_info = ler_titular(caminho, aba_titular, referencia, wb=wb, cancelar=cancelar)
         observacoes_datas += titular_info.observacoes_datas
         divergencias_datas += titular_info.divergencias_datas
-        dependente_info = ler_dependente(caminho, aba_dependente, referencia, wb=wb)
+        verificar_cancelamento(cancelar)
+        dependente_info = ler_dependente(
+            caminho, aba_dependente, referencia, wb=wb, cancelar=cancelar
+        )
         observacoes_datas += dependente_info.observacoes_datas
         divergencias_datas += dependente_info.divergencias_datas
-        suplementar_info = ler_suplementar(caminho, aba_suplementar, referencia, wb=wb)
+        verificar_cancelamento(cancelar)
+        suplementar_info = ler_suplementar(
+            caminho, aba_suplementar, referencia, wb=wb, cancelar=cancelar
+        )
         observacoes_datas += suplementar_info.observacoes_datas
         divergencias_datas += suplementar_info.divergencias_datas
 
+        verificar_cancelamento(cancelar)  # antes da juncao
         titular = titular_info.dados
         dependente = dependente_info.dados
         suplementar = suplementar_info.dados
@@ -230,6 +240,9 @@ def processar_arquivo(caminho: Path, mapa: dict) -> ResultadoArquivo:
             codigo_empresa=codigo_empresa,
             empresa=empresa,
         )
+    except ProcessamentoCancelado:
+        # Cancelar nao e erro do arquivo: interrompe todo o processamento.
+        raise
     except Exception as e:  # tryCatch(error = ...) do R captura qualquer erro
         return ResultadoArquivo(
             arquivo=arquivo,
@@ -363,15 +376,15 @@ def processar_arquivos(
     cancelar: Callable[[], bool] | None = None,
 ) -> Consolidado:
     """progresso(i, total, nome) e chamado antes de cada arquivo (i comeca em 1).
-    cancelar() e consultado antes de cada arquivo; True interrompe com
-    ProcessamentoCancelado."""
+    cancelar() e consultado antes de cada arquivo, entre as etapas de cada
+    arquivo e antes da consolidacao; True interrompe com ProcessamentoCancelado."""
     resultados = []
     total = len(caminhos)
     for i, caminho in enumerate(caminhos, start=1):
-        if cancelar and cancelar():
-            raise ProcessamentoCancelado("Processamento cancelado pelo usuario.")
+        verificar_cancelamento(cancelar)
         avisar_progresso(progresso, i, total, Path(caminho).name)
-        resultados.append(processar_arquivo(caminho, mapa))
+        resultados.append(processar_arquivo(caminho, mapa, cancelar=cancelar))
+    verificar_cancelamento(cancelar)
 
     # Adiciona um arquivo por vez para registrar no log uma eventual incompatibilidade.
     aceitos = []
