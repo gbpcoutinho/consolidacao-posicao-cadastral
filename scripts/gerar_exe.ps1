@@ -16,6 +16,13 @@ $py = Join-Path $raiz ".venv\Scripts\python.exe"
 & $py -m pip install -q -r requirements.txt -r requirements-app.txt
 if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar as dependencias." }
 
+# A leitura e a gravacao usam partes internas do openpyxl 3.1.5: so gera o
+# executavel com a suite verde (inclui o oraculo da leitura e, com o R
+# instalado, a paridade).
+$env:PARIDADE_OBRIGATORIA = if (Test-Path "C:\Program Files\R\R-4.6.1\bin\Rscript.exe") { "1" } else { "" }
+& $py -m pytest -q -p no:cacheprovider --basetemp (Join-Path ([System.IO.Path]::GetTempPath()) "cpc_pytest")
+if ($LASTEXITCODE -ne 0) { throw "Suite de testes falhou; o executavel nao foi gerado." }
+
 & $py -m PyInstaller --noconfirm --clean --distpath $Dist --workpath $Build ConsolidadorPC.spec
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller falhou." }
 
