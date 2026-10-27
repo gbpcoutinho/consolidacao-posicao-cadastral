@@ -199,7 +199,7 @@ def test_c6_cancelar_pelo_callback_de_progresso_continua_valendo(tmp_path):
 def test_c6_excecao_inesperada_vira_erro_de_validacao(tmp_path, monkeypatch):
     import consolidacao.pipeline as pipeline
 
-    def explode(c, destino):
+    def explode(c, destino, senha=None):
         raise KeyError("coluna")
 
     monkeypatch.setattr(pipeline, "escrever_excel", explode)
@@ -212,7 +212,7 @@ def test_c6_excecao_inesperada_vira_erro_de_validacao(tmp_path, monkeypatch):
 def test_c6_memoria_e_interrupcao_nao_sao_engolidas(tmp_path, monkeypatch, excecao):
     import consolidacao.pipeline as pipeline
 
-    def explode(c, destino):
+    def explode(c, destino, senha=None):
         raise excecao()
 
     monkeypatch.setattr(pipeline, "escrever_excel", explode)
@@ -237,7 +237,7 @@ def test_c7_arquivo_corrompido_tem_mensagem_em_portugues(tmp_path, conteudo):
 def test_c7_arquivo_em_uso_tem_mensagem_em_portugues(tmp_path, monkeypatch):
     import consolidacao.processamento as processamento
 
-    def em_uso(caminho):
+    def em_uso(caminho, senhas=()):
         raise PermissionError(13, "Permission denied", str(caminho))
 
     monkeypatch.setattr(processamento, "abrir_planilha", em_uso)
