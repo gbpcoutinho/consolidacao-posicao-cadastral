@@ -39,7 +39,9 @@ Busque, selecione e use **Incluir**, **Salvar edição** ou **Excluir**. O
 COD_SAUDE é obrigatório e não pode repetir. Cada confirmação grava direto no
 arquivo da rede; se outra pessoa alterou a mesma empresa agora, o app avisa e
 recarrega a tabela. Se o arquivo estiver aberto no Excel por alguém, tente de
-novo depois. Uma cópia do dia fica em `historico\` na pasta da rede.
+novo depois. Em `historico\` na pasta da rede fica, para cada dia com
+alteração, a relação como estava antes da primeira alteração daquele dia
+(`empresas_AAAAMMDD.csv`); nada é apagado automaticamente.
 
 ## Sem rede
 

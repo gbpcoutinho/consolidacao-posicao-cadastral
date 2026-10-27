@@ -306,10 +306,18 @@ def _aplicar_alteracao(linhas: list, alteracao: Alteracao) -> list:
 
 
 def _gravar_historico(caminho_rede: Path, anterior: bytes, agora: datetime) -> None:
-    pasta = caminho_rede.parent / PASTA_HISTORICO
-    pasta.mkdir(exist_ok=True)
-    # Um por dia, sobrescrito no mesmo dia; nada e apagado automaticamente.
-    _gravar_atomico(pasta / f"{caminho_rede.stem}_{agora:%Y%m%d}.csv", anterior)
+    """Um arquivo por dia com a versao vigente ANTES da primeira gravacao do
+    dia: nao e sobrescrito no mesmo dia e nada e apagado automaticamente.
+    Chamado so depois que a gravacao do definitivo deu certo; se falhar, a
+    edicao ja feita vale e o problema fica no log."""
+    try:
+        pasta = caminho_rede.parent / PASTA_HISTORICO
+        pasta.mkdir(exist_ok=True)
+        destino = pasta / f"{caminho_rede.stem}_{agora:%Y%m%d}.csv"
+        if not destino.exists():
+            _gravar_atomico(destino, anterior)
+    except OSError:
+        log.exception("Nao foi possivel gravar o historico da relacao em %s", caminho_rede.parent)
 
 
 def aplicar(
@@ -342,8 +350,8 @@ def aplicar(
         novas = _aplicar_alteracao(atual, alteracao)
         conteudo = _bytes(novas)
         mapa_empresas_de_texto(conteudo.decode("utf-8-sig"))
-        _gravar_historico(caminho_rede, anterior, agora)
         _gravar_atomico(caminho_rede, conteudo)
+        _gravar_historico(caminho_rede, anterior, agora)
     except PermissionError as e:
         raise EmUso(
             "Nao foi possivel gravar a relacao de empresas: arquivo aberto em outro "

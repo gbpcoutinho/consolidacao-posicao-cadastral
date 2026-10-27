@@ -1,5 +1,6 @@
 """Relacao de empresas compartilhada; tmp_path simula a pasta da rede."""
 import os
+from pathlib import Path
 from datetime import datetime, timedelta
 
 import pytest
@@ -302,13 +303,56 @@ def test_historico_um_por_dia(rede, dados):
     base = _aplicar(rede, base, incluir(Linha("DELTA", "90004", "")), agora=AGORA + timedelta(hours=1))
     historico = rede.parent / "historico"
     assert [p.name for p in historico.iterdir()] == ["empresas_20261026.csv"]
-    # Sobrescrito no mesmo dia: guarda a versao anterior a ultima gravacao.
-    assert (historico / "empresas_20261026.csv").read_bytes() == segunda
+    # Guarda a versao vigente ANTES da primeira gravacao do dia; nao e sobrescrito.
+    assert (historico / "empresas_20261026.csv").read_bytes() == original
+    terceira = rede.read_bytes()
     _aplicar(rede, base, incluir(Linha("EPSILON", "90005", "")), agora=AGORA + timedelta(days=1))
     assert sorted(p.name for p in historico.iterdir()) == [
         "empresas_20261026.csv", "empresas_20261027.csv",
     ]
-    assert original != segunda
+    assert (historico / "empresas_20261027.csv").read_bytes() == terceira
+    assert original != segunda != terceira
+
+
+def test_exclusao_por_engano_continua_no_historico_do_dia(rede, dados):
+    base = ler(rede, dados)
+    base = _aplicar(rede, base, excluir(base.linhas[1]))  # 9h: exclui a BETA por engano
+    _aplicar(rede, base, incluir(Linha("DELTA", "90004", "")), agora=AGORA + timedelta(hours=1))
+    historico = rede.parent / "historico" / "empresas_20261026.csv"
+    assert "BETA FICTICIA" in historico.read_bytes().decode("utf-8-sig")
+
+
+def test_gravacao_que_falha_nao_mexe_no_historico(rede, dados, monkeypatch):
+    base = ler(rede, dados)
+    original = os.replace
+
+    def negado(origem, destino):
+        # So o definitivo esta aberto no Excel; o historico gravaria.
+        if os.path.normcase(destino) == os.path.normcase(rede):
+            raise PermissionError(13, "Permission denied")
+        original(origem, destino)
+
+    monkeypatch.setattr(ec.os, "replace", negado)
+    with pytest.raises(EmUso):
+        _aplicar(rede, base, incluir(Linha("GAMA", "90003", "")))
+    monkeypatch.undo()
+    historico = rede.parent / "historico"
+    assert not historico.exists() or not any(historico.iterdir())
+
+
+def test_falha_so_no_historico_nao_desfaz_a_edicao(rede, dados, monkeypatch, caplog):
+    base = ler(rede, dados)
+    original = ec._gravar_atomico
+
+    def falha_no_historico(caminho, conteudo):
+        if Path(caminho).parent.name == "historico":
+            raise OSError("sem permissao na pasta historico")
+        original(caminho, conteudo)
+
+    monkeypatch.setattr(ec, "_gravar_atomico", falha_no_historico)
+    _aplicar(rede, base, incluir(Linha("GAMA", "90003", "")))
+    assert "90003" in carregar_mapa_empresas(rede)
+    assert "historico" in caplog.text
 
 
 # --- primeiro uso --------------------------------------------------------------
