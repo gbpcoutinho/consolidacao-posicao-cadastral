@@ -59,3 +59,20 @@ def test_fumo_com_erro_devolve_1(tmp_path, raiz_log):
         pasta=tmp_path / "dados",
     )
     assert codigo == 1
+
+
+def test_fumo_com_senhas_de_entrada_e_saida(tmp_path, raiz_log):
+    from tests.fabrica import cifrar_arquivo
+
+    entrada = tmp_path / "entrada"
+    entrada.mkdir()
+    for a in (EXEMPLOS / "entrada").glob("PC9000*.xlsx"):
+        cifrar_arquivo(a, entrada / a.name, "fumo-1")
+    saida = tmp_path / "fumo.xlsx"
+    args = ["--fumo", str(entrada), str(EXEMPLOS / "COD_EMPRESAS_EXEMPLO.csv"), str(saida)]
+    assert consolidador_app.main(args, pasta=tmp_path / "d1") == 1  # sem senha: erro por arquivo
+    codigo = consolidador_app.main(
+        args + ["--senha", "x", "--senha", "fumo-1", "--senha-saida", "fumo-2"],
+        pasta=tmp_path / "d2",
+    )
+    assert codigo == 0 and saida.read_bytes()[:8] == bytes.fromhex("d0cf11e0a1b11ae1")

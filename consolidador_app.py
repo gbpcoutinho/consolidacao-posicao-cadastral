@@ -53,10 +53,19 @@ def _escrever(texto: str) -> None:
 
 def fumo(argumentos: list) -> int:
     entrada, empresas, saida = (Path(a) for a in argumentos[:3])
+    # Opcionais: --senha X (repetivel) e --senha-saida X, so para o fumo do build.
+    senhas, senha_saida, resto = [], None, iter(argumentos[3:])
+    for opcao in resto:
+        valor = next(resto, "")
+        if opcao == "--senha":
+            senhas.append(valor)
+        elif opcao == "--senha-saida":
+            senha_saida = valor
     try:
         mapa = carregar_mapa_empresas(empresas)
         arquivos = listar_arquivos_entrada(entrada, date.today())
-        r = resumir(executar(arquivos, mapa, saida, arquivo_empresas=empresas))
+        r = resumir(executar(
+            arquivos, mapa, saida, arquivo_empresas=empresas, senhas=senhas, senha_saida=senha_saida))
     except ErroValidacao as e:
         log.error("Fumo falhou: %s", e)
         _escrever(f"ERRO: {e}")
