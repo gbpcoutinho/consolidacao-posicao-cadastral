@@ -305,3 +305,21 @@ def test_sem_rede_usa_cache_mostra_faixa_e_bloqueia_edicao(raiz, ambiente):
     assert str(app.bt_incluir.cget("state")) == "disabled"
     app.adicionar_caminhos(arquivos)
     assert str(app.bt_processar.cget("state")) == "normal"
+
+
+def test_salvar_em_cima_de_entrada_removida_da_lista_e_recusado(raiz, ambiente):
+    dados, rede, arquivos = ambiente
+    original = arquivos[0].read_bytes()
+    # 1a pergunta: "lista mudou; reprocessar?" -> nao. Depois: sim.
+    dialogos = Dialogos(respostas=[False], salvar=arquivos[0])
+    app = _app(raiz, dados, dialogos=dialogos,
+               processar_fn=lambda c, m, p, k: _consolidado_falso(3))
+    app.adicionar_caminhos(arquivos)
+    app.processar()
+    _rodar_ate(raiz, lambda: app.resultado is not None)
+    app.tree_arquivos.selection_set("0")
+    app.remover()
+    app.salvar_como()
+    _rodar_ate(raiz, lambda: dialogos.erros)
+    assert "arquivos de entrada" in dialogos.erros[0]
+    assert arquivos[0].read_bytes() == original

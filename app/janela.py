@@ -476,6 +476,7 @@ class App:
             return
         caminhos = [i.caminho for i in self.itens]
         mapa = dict(self.mapa)
+        self.caminhos_processados = list(caminhos)
         self.retrato = retratar(self.itens, r)
         self.origem_processada = r
         self.resultado = None
@@ -627,7 +628,10 @@ class App:
         self._lembrar("ultima_pasta_saida", destino.parent)
         self.saida_pendente = destino
         resultado = self.resultado
-        caminhos = [i.caminho for i in self.itens]
+        # A saida nao pode ser nenhuma entrada: nem as da lista atual nem as
+        # processadas (uma planilha removida da lista continua sendo entrada).
+        caminhos = list(dict.fromkeys(
+            list(getattr(self, "caminhos_processados", [])) + [i.caminho for i in self.itens]))
         empresas = self.caminho_relacao
         self.texto_progresso.set("Gravando o arquivo de saída...")
         self._iniciar("gravar", lambda p, c: self.gravar_fn(
