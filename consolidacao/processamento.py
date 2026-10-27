@@ -16,6 +16,7 @@ from .datas import resumir_observacoes_datas
 from .empresas import empresa_da_referencia
 from .erros import ErroValidacao, ProcessamentoCancelado, verificar_cancelamento
 from .leitura import abrir_planilha, ler_dependente, ler_suplementar, ler_titular
+from .protecao import ocultar_senhas
 
 COLUNAS_PENDENCIAS = [
     "REFERENCIA", "EMPRESA", "NUMERO DA SUBFATURA", "NUMERO DO CERTIFICADO",
@@ -68,16 +69,18 @@ def _exatamente_uma(abas, padrao, descricao):
     return encontradas[0]
 
 
-def _mensagem_erro(e: Exception) -> str:
+def _mensagem_erro(e: Exception, senhas=()) -> str:
     # Erros de abertura viram texto para o usuario; o resto segue como no R.
     if isinstance(e, (zipfile.BadZipFile, InvalidFileException)):
         return "Nao foi possivel abrir o arquivo: arquivo corrompido ou nao e .xlsx."
     if isinstance(e, PermissionError):
         return "Nao foi possivel abrir o arquivo: arquivo em uso ou sem permissao."
-    return str(e)
+    return ocultar_senhas(str(e), senhas)
 
 
-def processar_arquivo(caminho: Path, mapa: dict, cancelar=None) -> ResultadoArquivo:
+def processar_arquivo(
+    caminho: Path, mapa: dict, cancelar=None, senhas=()
+) -> ResultadoArquivo:
     """cancelar() e consultado entre as etapas (leitura de cada aba, datas,
     juncao); True interrompe com ProcessamentoCancelado, nunca com ERRO no log."""
     caminho = Path(caminho)
@@ -90,7 +93,7 @@ def processar_arquivo(caminho: Path, mapa: dict, cancelar=None) -> ResultadoArqu
         codigo_empresa, empresa = empresa_da_referencia(referencia, mapa)
 
         # Abre o arquivo uma unica vez para todas as abas.
-        wb = abrir_planilha(caminho)
+        wb = abrir_planilha(caminho, senhas)
         abas = list(wb.sheetnames)
         aba_titular = _exatamente_uma(abas, "TITULAR", "de TITULAR")
         aba_dependente = _exatamente_uma(abas, "DEPENDENT", "de DEPENDENTE")
@@ -248,7 +251,7 @@ def processar_arquivo(caminho: Path, mapa: dict, cancelar=None) -> ResultadoArqu
             arquivo=arquivo,
             referencia=referencia,
             status="ERRO",
-            mensagem=_mensagem_erro(e),
+            mensagem=_mensagem_erro(e, senhas),
             observacoes_datas=observacoes_datas,
             divergencias_datas=divergencias_datas,
         )
@@ -374,8 +377,10 @@ def processar_arquivos(
     mapa: dict,
     progresso: Callable[[int, int, str], None] | None = None,
     cancelar: Callable[[], bool] | None = None,
+    senhas=(),
 ) -> Consolidado:
-    """progresso(i, total, nome) e chamado antes de cada arquivo (i comeca em 1).
+    """senhas: tentadas em ordem nos arquivos protegidos (nunca vao ao Log).
+    progresso(i, total, nome) e chamado antes de cada arquivo (i comeca em 1).
     cancelar() e consultado antes de cada arquivo, entre as etapas de cada
     arquivo e antes da consolidacao; True interrompe com ProcessamentoCancelado."""
     resultados = []
@@ -383,7 +388,7 @@ def processar_arquivos(
     for i, caminho in enumerate(caminhos, start=1):
         verificar_cancelamento(cancelar)
         avisar_progresso(progresso, i, total, Path(caminho).name)
-        resultados.append(processar_arquivo(caminho, mapa, cancelar=cancelar))
+        resultados.append(processar_arquivo(caminho, mapa, cancelar=cancelar, senhas=senhas))
     verificar_cancelamento(cancelar)
 
     # Adiciona um arquivo por vez para registrar no log uma eventual incompatibilidade.

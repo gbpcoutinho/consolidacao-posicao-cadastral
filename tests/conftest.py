@@ -16,7 +16,9 @@ def _oraculo_da_leitura(monkeypatch):
     original = leitura.ler_linhas_brutas
 
     def conferido(wb, aba, cancelar=None):
-        caminho = Path(wb._archive.filename)
+        # Planilha decifrada em memoria: o arquivo e o proprio BytesIO.
+        caminho = wb._archive.filename and Path(wb._archive.filename) or wb._archive.fp
+        nome = getattr(caminho, "name", "<memoria>")
         try:
             novo = original(wb, aba, cancelar)
             erro_novo = None
@@ -31,13 +33,13 @@ def _oraculo_da_leitura(monkeypatch):
             antigo, erro_antigo = None, e
         if erro_novo is not None or erro_antigo is not None:
             assert (type(erro_novo), str(erro_novo)) == (type(erro_antigo), str(erro_antigo)), (
-                f"{caminho.name} [{aba}]"
+                f"{nome} [{aba}]"
             )
             raise erro_novo
         linhas, varridas = novo
         aplicadas = copy.copy([list(l) for l in linhas])
         leitura._aplicar_varredura(aplicadas, varridas)
-        assert leitura_antiga.normalizar(aplicadas) == antigo, f"{caminho.name} [{aba}]"
+        assert leitura_antiga.normalizar(aplicadas) == antigo, f"{nome} [{aba}]"
         return novo
 
     monkeypatch.setattr(leitura, "ler_linhas_brutas", conferido)
