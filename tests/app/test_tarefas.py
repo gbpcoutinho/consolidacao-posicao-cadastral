@@ -129,3 +129,19 @@ def test_nao_inicia_duas_vezes():
         t.iniciar()
     liberar.set()
     _esperar(t)
+
+
+def test_erro_inesperado_do_motor_vai_para_log_e_tela_generica(tmp_path, monkeypatch, caplog):
+    from consolidacao import pipeline
+
+    def explode(*a, **k):
+        raise KeyError("NUMERO DO CERTIFICADO")
+
+    monkeypatch.setattr(pipeline, "processar_arquivos", explode)
+    t = Trabalho(lambda p, c: pipeline.processar([tmp_path / "x.xlsx"], {}, p, c))
+    with caplog.at_level(logging.ERROR):
+        t.iniciar()
+        ultimo = _esperar(t)[-1]
+    assert ultimo == Evento("erro", "Erro inesperado; detalhes em logs/app.log")
+    assert "KeyError" in caplog.text and "NUMERO DO CERTIFICADO" in caplog.text
+    assert "Traceback" in caplog.text and "explode" in caplog.text

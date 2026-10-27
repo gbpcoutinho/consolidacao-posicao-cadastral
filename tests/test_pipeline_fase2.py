@@ -141,3 +141,14 @@ def test_executar_valida_saida_antes_de_processar(tmp_path, monkeypatch):
     with pytest.raises(ErroValidacao):
         pipeline.executar(arquivos, MAPA, arquivos[0])
     assert chamado == []
+
+
+def test_erro_inesperado_e_subclasse_de_erro_de_validacao(tmp_path, monkeypatch):
+    from consolidacao import pipeline
+    from consolidacao.erros import ErroInesperado
+
+    monkeypatch.setattr(pipeline, "processar_arquivos", lambda *a, **k: {}["x"])
+    with pytest.raises(ErroInesperado) as info:
+        pipeline.processar([], MAPA)
+    assert isinstance(info.value, ErroValidacao)
+    assert str(info.value).startswith("Erro inesperado ao gerar a consolidacao (KeyError")

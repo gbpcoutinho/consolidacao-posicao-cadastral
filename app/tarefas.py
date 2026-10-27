@@ -10,7 +10,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
-from consolidacao.erros import ErroValidacao, ProcessamentoCancelado
+from consolidacao.erros import ErroInesperado, ErroValidacao, ProcessamentoCancelado
 
 MENSAGEM_INESPERADO = "Erro inesperado; detalhes em logs/app.log"
 MENSAGEM_MEMORIA = (
@@ -85,6 +85,12 @@ class Trabalho:
             resultado = self._funcao(self._progresso, self._pedido.is_set)
         except ProcessamentoCancelado:
             self._fila.put(Evento("cancelado"))
+        except ErroInesperado as e:
+            # Defeito embrulhado pelo motor: traceback original no log.
+            causa = e.__cause__ or e
+            log.error("Erro inesperado no processamento: %s", e,
+                      exc_info=(type(causa), causa, causa.__traceback__))
+            self._fila.put(Evento("erro", MENSAGEM_INESPERADO))
         except ErroValidacao as e:
             self._fila.put(Evento("erro", str(e)))
         except MemoryError:

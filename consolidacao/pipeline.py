@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Callable
 
-from .erros import ErroValidacao, ProcessamentoCancelado
+from .erros import ErroInesperado, ErroValidacao, ProcessamentoCancelado
 from .exportacao import escrever_excel
 from .processamento import Consolidado, avisar_progresso, processar_arquivos
 
@@ -48,7 +48,7 @@ def _protegido(funcao, *args, **kwargs):
     except (ErroValidacao, ProcessamentoCancelado, MemoryError):
         raise
     except Exception as e:
-        raise ErroValidacao(
+        raise ErroInesperado(
             f"Erro inesperado ao gerar a consolidacao ({type(e).__name__}: {e})."
         ) from e
 
