@@ -8,8 +8,12 @@ from xml.etree import ElementTree
 
 import openpyxl
 import pandas as pd
-from openpyxl.styles.numbers import is_date_format
-from openpyxl.utils.datetime import WINDOWS_EPOCH, from_excel, to_excel
+from openpyxl.cell.text import Text
+from openpyxl.styles.numbers import BUILTIN_FORMATS, BUILTIN_FORMATS_MAX_SIZE, is_date_format
+from openpyxl.utils.cell import coordinate_to_tuple
+from openpyxl.utils.datetime import WINDOWS_EPOCH, from_excel, from_ISO8601, to_excel
+from openpyxl.worksheet._reader import _cast_number
+from openpyxl.xml.constants import SHEET_MAIN_NS
 
 from .cabecalhos import (
     chave_certificado,
@@ -28,7 +32,7 @@ from .config import (
     COLUNAS_OPCIONAIS_TITULAR,
 )
 from .datas import texto_celula, validar_colunas_data
-from .erros import ErroValidacao
+from .erros import ErroValidacao, verificar_cancelamento
 
 
 @dataclass
@@ -46,12 +50,13 @@ class ResultadoAba:
 _PRESENTE_NA = object()
 
 
-def _valor_bruto(celula, epoch):
+def _valor_bruto(tipo: str, v, eh_data, epoch):
+    """Valor da celula como o readxl o enxerga. eh_data() diz se o formato de
+    numero da celula e de data (so e consultado para numeros)."""
     # Celulas com erro do Excel (#N/A etc.) sao NA no readxl.
-    if getattr(celula, "data_type", None) == "e":
+    if tipo == "e":
         return _PRESENTE_NA
-    v = celula.value
-    if isinstance(v, (int, float)) and not isinstance(v, bool) and is_date_format(celula.number_format):
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and eh_data():
         # Numero fora da faixa de datas (ex.: CPF em celula com formato de data)
         # fica como numero, como no readxl, em vez de virar erro.
         try:
@@ -181,12 +186,12 @@ def varrer_celulas(caminho: Path, aba: str):
                 elem.clear()
 
 
-def _aplicar_xml(linhas: list, caminho: Path, aba: str) -> None:
-    """Completa a leitura do openpyxl com o XML da aba, como faz o readxl:
+def _aplicar_varredura(linhas: list, celulas) -> None:
+    """Completa as linhas lidas com a varredura do XML da aba, como faz o readxl:
     - celula com <f> ou <v> mas sem valor (formula sem cache, <v/>) conta na
       faixa lida; o openpyxl a le como None;
     - numero (t="n") e data (t="d") guardam o texto bruto de <v>."""
-    for linha, coluna, tipo, bruto, formula in varrer_celulas(caminho, aba):
+    for linha, coluna, tipo, bruto, formula in celulas:
         if formula and not bruto or bruto == "":
             while len(linhas) < linha:
                 linhas.append([])
@@ -204,29 +209,185 @@ def _aplicar_xml(linhas: list, caminho: Path, aba: str) -> None:
                 linhas[linha - 1][coluna - 1] = _NumeroBruto(v, bruto)
 
 
+_TAG_LINHA = f"{{{SHEET_MAIN_NS}}}row"
+_TAG_V = f"{{{SHEET_MAIN_NS}}}v"
+_TAG_IS = f"{{{SHEET_MAIN_NS}}}is"
+_TAG_T = f"{{{SHEET_MAIN_NS}}}t"
+
+
+class _Leitor:
+    """Le a aba numa unica passada pelo XML e produz o mesmo que antes saia de
+    duas: (1) as linhas do openpyxl read_only (iter_rows apos reset_dimensions,
+    data_only, sem conversao de datas) ja passadas por _valor_bruto e (2) as
+    celulas de varrer_celulas. Cada parte segue as regras da sua origem (as do
+    openpyxl copiadas de openpyxl/worksheet/_reader.py e _read_only.py, 3.1)."""
+
+    def __init__(self, wb, aba, cancelar=None):
+        ws = wb[aba]
+        self.wb, self.epoch = wb, wb.epoch
+        self.fonte = ws._worksheet_path
+        self.strings = ws._shared_strings
+        self.cancelar = cancelar
+        self.formatos = {}
+
+    def _eh_data(self, estilo: int) -> bool:
+        # Formato como em ReadOnlyCell.number_format; um calculo por estilo.
+        if estilo not in self.formatos:
+            _id = self.wb._cell_styles[estilo].numFmtId
+            if _id < BUILTIN_FORMATS_MAX_SIZE:
+                formato = BUILTIN_FORMATS.get(_id, "General")
+            else:
+                formato = self.wb._number_formats[_id - BUILTIN_FORMATS_MAX_SIZE]
+            self.formatos[estilo] = is_date_format(formato)
+        return self.formatos[estilo]
+
+    def _celula_openpyxl(self, el):
+        """WorkSheetParser.parse_cell (data_only) seguido de _valor_bruto."""
+        tipo = el.get("t", "n")
+        coordenada = el.get("r")
+        estilo = el.get("s", 0)
+        if estilo:
+            estilo = int(estilo)
+        valor = None if tipo == "inlineStr" else (el.findtext(_TAG_V, None) or None)
+        if coordenada:
+            _, coluna = coordinate_to_tuple(coordenada)
+            self.col_openpyxl = coluna
+        else:
+            self.col_openpyxl += 1
+            coluna = self.col_openpyxl
+        if valor is not None:
+            if tipo == "n":
+                valor = _cast_number(valor)
+            elif tipo == "s":
+                valor = self.strings[int(valor)]
+            elif tipo == "b":
+                valor = bool(int(valor))
+            elif tipo == "str":
+                tipo = "s"
+            elif tipo == "d":
+                valor = from_ISO8601(valor)
+        elif tipo == "inlineStr":
+            filho = el.find(_TAG_IS)
+            if filho is not None:
+                tipo = "s"
+                if len(filho) == 1 and filho[0].tag == _TAG_T and not filho[0].attrib:
+                    valor = filho[0].text or ""
+                else:
+                    valor = Text.from_tree(filho).content
+        return coluna, _valor_bruto(tipo, valor, lambda: self._eh_data(estilo), self.epoch)
+
+    def _fechar_linha_openpyxl(self, elem, linhas):
+        # WorkSheetParser.parse_row + ReadOnlyWorksheet._cells_by_row/_get_row.
+        r = elem.get("r")
+        if r is not None:
+            try:
+                self.linha_openpyxl = int(r)
+            except ValueError:
+                val = float(r)
+                if val.is_integer():
+                    self.linha_openpyxl = int(val)
+                else:
+                    raise ValueError(f"{r} is not a valid row number")
+        else:
+            self.linha_openpyxl += 1
+        self.col_openpyxl = 0
+        celulas = [self._celula_openpyxl(el) for el in elem]
+        idx = self.linha_openpyxl
+        for _ in range(self.contador, idx):
+            self.contador += 1
+            linhas.append([])
+        if self.contador <= idx:
+            if not celulas:
+                valores = []
+            else:
+                largura = celulas[-1][0]
+                valores = [None] * largura
+                for coluna, valor in celulas:
+                    if 1 <= coluna <= largura:
+                        valores[coluna - 1] = valor
+            self.contador += 1
+            linhas.append(valores)
+            if len(linhas) % LINHAS_ENTRE_CONSULTAS == 0:
+                verificar_cancelamento(self.cancelar)
+
+    def ler(self):
+        linhas, varridas = [], []
+        self.linha_openpyxl = self.col_openpyxl = 0
+        self.contador = 1
+        erro_varredura = None
+        linha, coluna, celula = 0, 0, None
+        verificar_cancelamento(self.cancelar)
+        nomes = {}  # tag -> nome local: rsplit em cada evento pesava no perfil
+        with self.wb._archive.open(self.fonte) as xml:
+            for evento, elem in ElementTree.iterparse(xml, events=("start", "end")):
+                tag = elem.tag
+                nome = nomes.get(tag)
+                if nome is None:
+                    nome = nomes[tag] = _nome_local(tag)
+                if evento == "start":
+                    # Parte de varrer_celulas (nomes locais, qualquer namespace).
+                    try:
+                        if nome == "row":
+                            linha = int(elem.get("r")) if elem.get("r") else linha + 1
+                            coluna = 0
+                        elif nome == "c":
+                            ref = elem.get("r")
+                            if ref:
+                                linha, coluna = _linha_coluna(ref)
+                            else:
+                                coluna += 1
+                            celula = [elem.get("t", "n"), None, False]
+                    except Exception as e:  # na leitura antiga esta parte vinha depois
+                        erro_varredura = erro_varredura or e
+                        celula = None
+                    continue
+                if celula is not None:
+                    if nome == "v":
+                        celula[1] = elem.text or ""
+                    elif nome == "f":
+                        celula[2] = True
+                    elif nome == "c":
+                        varridas.append((linha, coluna, *celula))
+                        celula = None
+                if tag == _TAG_LINHA:
+                    self._fechar_linha_openpyxl(elem, linhas)
+                if nome == "row":
+                    elem.clear()
+        if erro_varredura is not None:
+            raise erro_varredura
+        return linhas, varridas
+
+
+# De quantas em quantas linhas a leitura de uma aba consulta o Cancelar.
+LINHAS_ENTRE_CONSULTAS = 2000
+
+
+def ler_linhas_brutas(wb, aba: str, cancelar=None) -> tuple:
+    """(linhas brutas da aba, celulas da varredura do XML)."""
+    return _Leitor(wb, aba, cancelar).ler()
+
+
 def abrir_planilha(caminho: Path):
     """Abre o arquivo uma vez para ler todas as abas (feche com .close())."""
     return openpyxl.load_workbook(caminho, read_only=True, data_only=True)
 
 
-def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None) -> pd.DataFrame:
+def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None, cancelar=None) -> pd.DataFrame:
     proprio = wb is None
     if proprio:
         wb = abrir_planilha(caminho)
     try:
-        ws = wb[aba]
-        # O readxl nao usa o <dimension> gravado no arquivo; ele pode estar errado.
-        ws.reset_dimensions()
-        # A conversao de datas e duracoes e feita em _valor_bruto: a do openpyxl
-        # transforma numeros fora da faixa em erro e duracoes em timedelta.
-        wb._date_formats = set()
-        wb._timedelta_formats = set()
+        # Uma passada so pelo XML (antes eram duas: openpyxl e varrer_celulas).
+        # Como o readxl, nao usa o <dimension> gravado no arquivo, e a
+        # conversao de datas e feita aqui, nao pelo openpyxl. O Cancelar e
+        # consultado a cada bloco de linhas.
+        linhas, varridas = ler_linhas_brutas(wb, aba, cancelar)
         epoch = wb.epoch
-        linhas = [[_valor_bruto(c, epoch) for c in linha] for linha in ws.iter_rows()]
     finally:
         if proprio:
             wb.close()
-    _aplicar_xml(linhas, caminho, aba)
+    verificar_cancelamento(cancelar)
+    _aplicar_varredura(linhas, varridas)
 
     # Como no readxl: o cabecalho fica na linha max(skip, 1a linha com conteudo
     # da aba inteira). Se ha conteudo antes do skip e a linha do skip esta
@@ -266,9 +427,9 @@ def _adicionar_coluna(df: pd.DataFrame, nome: str, valores) -> None:
     df[nome] = pd.Series(list(valores), index=df.index, dtype=object)
 
 
-def ler_titular(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
+def ler_titular(caminho: Path, aba: str, referencia: str, wb=None, cancelar=None) -> ResultadoAba:
     contexto = f"TITULAR: {referencia}"
-    df = ler_aba(caminho, aba, skip=2, wb=wb)
+    df = ler_aba(caminho, aba, skip=2, wb=wb, cancelar=cancelar)
     regras = {
         "REATIVA": "DATA DE REATIVACAO",
         "REGI.O": "REGIAO",
@@ -277,6 +438,7 @@ def ler_titular(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoA
     }
     df = renomear_e_validar_cabecalhos(df, regras, contexto)
     df = validar_identificadores_como_texto(df, contexto)
+    verificar_cancelamento(cancelar)
     df, observacoes, divergencias = validar_colunas_data(df, contexto)
     validar_colunas(df, COLUNAS_OBRIGATORIAS_TITULAR, contexto)
 
@@ -315,9 +477,9 @@ def _sem_linha_de_resumo(bruto: pd.DataFrame) -> bool:
     return ultimo is None or trimws(str(ultimo)) != "4"
 
 
-def ler_dependente(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
+def ler_dependente(caminho: Path, aba: str, referencia: str, wb=None, cancelar=None) -> ResultadoAba:
     contexto = f"DEPENDENTE: {referencia}"
-    bruto = ler_aba(caminho, aba, skip=0, wb=wb)
+    bruto = ler_aba(caminho, aba, skip=0, wb=wb, cancelar=cancelar)
     avisos_estrutura = []
 
     if _sem_linha_de_resumo(bruto):
@@ -347,6 +509,7 @@ def ler_dependente(caminho: Path, aba: str, referencia: str, wb=None) -> Resulta
     }
     df = renomear_e_validar_cabecalhos(df, regras, contexto)
     df = validar_identificadores_como_texto(df, contexto)
+    verificar_cancelamento(cancelar)
     df, observacoes, divergencias = validar_colunas_data(df, contexto)
     validar_colunas(df, COLUNAS_OBRIGATORIAS_DEPENDENTE, contexto)
 
@@ -427,11 +590,12 @@ def agregar_aba_suplementar(df: pd.DataFrame, contexto: str) -> pd.DataFrame:
     return pd.DataFrame(linhas, columns=[".CHAVE_CERTIFICADO", ".CARTAO_SUP", ".NOME_MAE_SUP"], dtype=object)
 
 
-def ler_suplementar(caminho: Path, aba: str, referencia: str, wb=None) -> ResultadoAba:
+def ler_suplementar(caminho: Path, aba: str, referencia: str, wb=None, cancelar=None) -> ResultadoAba:
     contexto = f"POS. CADASTRAL (NOME M E): {referencia}"
-    df = ler_aba(caminho, aba, skip=0, wb=wb)
+    df = ler_aba(caminho, aba, skip=0, wb=wb, cancelar=cancelar)
     regras = {"^CART.?O$": "CARTAO", "^NOME_DA_M.?E$": "NOME DA MAE"}
     df = renomear_e_validar_cabecalhos(df, regras, contexto)
+    verificar_cancelamento(cancelar)
     df, observacoes, divergencias = validar_colunas_data(df, contexto)
     agregado = agregar_aba_suplementar(df, contexto)
     return ResultadoAba(

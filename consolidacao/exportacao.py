@@ -2,12 +2,14 @@
 import math
 import os
 import tempfile
+import warnings
+from copy import copy
 from datetime import date, datetime
 from pathlib import Path
 
 import openpyxl
 import pandas as pd
-from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE, WriteOnlyCell
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
@@ -95,7 +97,19 @@ def _celula(v):
     return ILLEGAL_CHARACTERS_RE.sub("", v) if isinstance(v, str) else v
 
 
+def _alinhamento_coluna(nome: str, data: bool) -> Alignment:
+    if data:
+        return _ALINHAMENTO_CENTRO
+    if nome == "CODIGO DO DEPENDENTE":
+        return _ALINHAMENTO_DIREITA
+    if nome in COLUNAS_CENTRALIZADAS:
+        return _ALINHAMENTO_CENTRO
+    return _ALINHAMENTO_CORPO
+
+
 def adicionar_aba_formatada(wb, df: pd.DataFrame, nome_aba: str, nome_tabela: str) -> None:
+    """Escreve a aba num Workbook(write_only=True): estilos, larguras, altura do
+    cabecalho, tabela/filtro e congelamento sao definidos antes das linhas."""
     if len(df.columns) == 0:
         raise ValueError(f"A aba '{nome_aba}' nao tem colunas para exportar.")
     ws = wb.create_sheet(nome_aba)
@@ -103,29 +117,12 @@ def adicionar_aba_formatada(wb, df: pd.DataFrame, nome_aba: str, nome_tabela: st
 
     colunas = [str(c) for c in df.columns]
     n_linhas, n_colunas = len(df), len(colunas)
-    valores = {c: df[c].tolist() for c in df.columns}
-
-    # Em todas as abas, os cabecalhos ficam na linha 1 e os dados comecam na 2.
-    ws.append(colunas)
-    for i in range(n_linhas):
-        ws.append([_celula(valores[c][i]) for c in df.columns])
-
-    ultima = get_column_letter(n_colunas)
-    if n_linhas > 0:
-        tabela = Table(displayName=nome_tabela, ref=f"A1:{ultima}{n_linhas + 1}")
-        tabela.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
-        ws.add_table(tabela)
-    else:
-        ws.auto_filter.ref = f"A1:{ultima}1"
-
-    for celula in ws[1]:
-        for atributo, estilo in _ESTILO_CABECALHO.items():
-            setattr(celula, atributo, estilo)
+    valores = [df[c].tolist() for c in df.columns]
 
     for j, nome in enumerate(colunas, start=1):
         largura = min(
             LARGURA_AUTO_MAXIMA,
-            max(len(_texto_exibido(v)) for v in [nome, *valores[df.columns[j - 1]]]) + 2,
+            max(len(_texto_exibido(v)) for v in [nome, *valores[j - 1]]) + 2,
         )
         if nome in LARGURA_MANUAL:
             largura = LARGURA_MANUAL[nome]
@@ -133,27 +130,50 @@ def adicionar_aba_formatada(wb, df: pd.DataFrame, nome_aba: str, nome_tabela: st
         if "DATA" in nome.upper():
             largura = largura_coluna_data(nome)
         ws.column_dimensions[get_column_letter(j)].width = largura
-
     ws.row_dimensions[1].height = 32
-
-    if n_linhas > 0:
-        for j, coluna in enumerate(df.columns, start=1):
-            nome = colunas[j - 1]
-            data = _coluna_de_datas(nome, valores[coluna])
-            if data:
-                alinhamento = _ALINHAMENTO_CENTRO
-            elif nome == "CODIGO DO DEPENDENTE":
-                alinhamento = _ALINHAMENTO_DIREITA
-            elif nome in COLUNAS_CENTRALIZADAS:
-                alinhamento = _ALINHAMENTO_CENTRO
-            else:
-                alinhamento = _ALINHAMENTO_CORPO
-            for (celula,) in ws.iter_rows(min_row=2, max_row=n_linhas + 1, min_col=j, max_col=j):
-                celula.alignment = alinhamento
-                if data:
-                    celula.number_format = "dd/mm/yyyy"
-
     ws.freeze_panes = "A2"
+
+    ultima = get_column_letter(n_colunas)
+    if n_linhas > 0:
+        tabela = Table(displayName=nome_tabela, ref=f"A1:{ultima}{n_linhas + 1}")
+        tabela.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+        # No modo write_only o openpyxl nao le os cabecalhos da aba: nomes explicitos.
+        tabela._initialise_columns()
+        for coluna, nome in zip(tabela.tableColumns, colunas):
+            coluna.name = nome
+        with warnings.catch_warnings():
+            # Aviso fixo do modo write_only; as colunas ja foram nomeadas acima.
+            warnings.filterwarnings("ignore", message="In write-only mode")
+            ws.add_table(tabela)
+    else:
+        ws.auto_filter.ref = f"A1:{ultima}1"
+
+    cabecalho = []
+    for nome in colunas:
+        celula = WriteOnlyCell(ws, value=nome)
+        for atributo, estilo in _ESTILO_CABECALHO.items():
+            setattr(celula, atributo, estilo)
+        cabecalho.append(celula)
+    ws.append(cabecalho)
+
+    # Um molde de estilo por coluna: atribuir alinhamento celula a celula
+    # recalcula o estilo a cada vez e dominava o tempo de gravacao.
+    moldes = []
+    for nome, coluna in zip(colunas, valores):
+        data = _coluna_de_datas(nome, coluna)
+        molde = WriteOnlyCell(ws)
+        molde.alignment = _alinhamento_coluna(nome, data)
+        if data:
+            molde.number_format = "dd/mm/yyyy"
+        moldes.append(molde._style)
+
+    for i in range(n_linhas):
+        linha = []
+        for j in range(n_colunas):
+            celula = WriteOnlyCell(ws, value=_celula(valores[j][i]))
+            celula._style = copy(moldes[j])
+            linha.append(celula)
+        ws.append(linha)
 
 
 def validar_limite_linhas(c) -> None:
@@ -169,8 +189,8 @@ def validar_limite_linhas(c) -> None:
 
 def escrever_excel(c, destino: Path) -> None:
     validar_limite_linhas(c)
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active)
+    # write_only: grava em fluxo, sem montar a planilha inteira na memoria.
+    wb = openpyxl.Workbook(write_only=True)
     for atributo, nome_aba, nome_tabela in ABAS_SAIDA:
         adicionar_aba_formatada(wb, getattr(c, atributo), nome_aba, nome_tabela)
 
@@ -196,7 +216,20 @@ def escrever_excel(c, destino: Path) -> None:
     finally:
         # Qualquer falha (inclusive fora de OSError) nao deixa o temporario na pasta.
         if temporario is not None:
+            _descartar_abas(wb)
             try:
                 temporario.unlink(missing_ok=True)
             except OSError:
                 pass  # nao esconde o erro original
+
+
+def _descartar_abas(wb) -> None:
+    # Abas write_only que nao chegaram a ser gravadas deixam um gerador aberto;
+    # fecha-lo aqui evita um aviso "Exception ignored" mais tarde.
+    for ws in wb.worksheets:
+        linhas = getattr(ws, "_rows", None)
+        if linhas is not None:
+            try:
+                linhas.close()
+            except Exception:
+                pass

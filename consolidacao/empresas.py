@@ -17,6 +17,11 @@ def _ler_texto(caminho: Path) -> str:
             f"Nao foi possivel ler o arquivo de empresas '{caminho}': confira se e um "
             "arquivo .csv e se nao esta em uso ou sem permissao de leitura."
         ) from e
+    return decodificar_csv(dados, caminho)
+
+
+def decodificar_csv(dados: bytes, caminho) -> str:
+    """UTF-8 (com ou sem BOM) ou, se nao for, ANSI (cp1252) do Excel."""
     try:
         return dados.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -35,8 +40,13 @@ def carregar_mapa_empresas(caminho: Path) -> dict:
     caminho = Path(caminho)
     if not caminho.exists():
         raise ErroValidacao(f"Arquivo de empresas nao encontrado: {caminho}")
+    return mapa_empresas_de_texto(_ler_texto(caminho))
 
-    linhas = [l for l in _ler_texto(caminho).splitlines() if l.strip() != ""]
+
+def mapa_empresas_de_texto(texto: str) -> dict:
+    """Mesma regra de carregar_mapa_empresas, sobre o conteudo ja lido (o app
+    valida a relacao compartilhada antes de grava-la)."""
+    linhas = [l for l in texto.splitlines() if l.strip() != ""]
     if not linhas:
         raise ErroValidacao("O COD_EMPRESAS.csv esta vazio.")
 
