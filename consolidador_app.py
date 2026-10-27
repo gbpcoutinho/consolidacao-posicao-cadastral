@@ -18,6 +18,7 @@ from consolidacao.empresas import carregar_mapa_empresas
 from consolidacao.erros import ErroValidacao
 from consolidacao.pipeline import executar, resumir
 from consolidacao.processamento import listar_arquivos_entrada
+from consolidacao.protecao import PADRAO_SENHA_AUTOMATICA
 
 log = logging.getLogger("consolidador")
 
@@ -54,10 +55,15 @@ def _escrever(texto: str) -> None:
 def fumo(argumentos: list) -> int:
     entrada, empresas, saida = (Path(a) for a in argumentos[:3])
     # Opcionais: --senha X (repetivel) e --senha-saida X, so para o fumo do build.
-    senhas, senha_saida, resto = [], None, iter(argumentos[3:])
+    senhas, senha_saida, padrao, resto = [], None, PADRAO_SENHA_AUTOMATICA, iter(argumentos[3:])
     for opcao in resto:
+        if opcao == "--sem-senha-automatica":
+            padrao = None
+            continue
         valor = next(resto, "")
-        if opcao == "--senha":
+        if opcao == "--padrao-senha":
+            padrao = valor
+        elif opcao == "--senha":
             senhas.append(valor)
         elif opcao == "--senha-saida":
             senha_saida = valor
@@ -65,7 +71,8 @@ def fumo(argumentos: list) -> int:
         mapa = carregar_mapa_empresas(empresas)
         arquivos = listar_arquivos_entrada(entrada, date.today())
         r = resumir(executar(
-            arquivos, mapa, saida, arquivo_empresas=empresas, senhas=senhas, senha_saida=senha_saida))
+            arquivos, mapa, saida, arquivo_empresas=empresas, senhas=senhas, senha_saida=senha_saida,
+            padrao_senha=padrao))
     except ErroValidacao as e:
         log.error("Fumo falhou: %s", e)
         _escrever(f"ERRO: {e}")
@@ -87,6 +94,12 @@ def main(argv: list | None = None, pasta: Path | None = None) -> int:
 
     from app.janela import App
 
+    try:  # agrupa a janela na barra de tarefas com o icone do proprio app
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("GrupoVidda.ConsolidadorPC")
+    except Exception:
+        log.debug("AppUserModelID indisponivel", exc_info=True)
     raiz = tk.Tk()
 
     def mostrar(texto):

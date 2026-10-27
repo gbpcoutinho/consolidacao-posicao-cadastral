@@ -16,7 +16,7 @@ from .datas import resumir_observacoes_datas
 from .empresas import empresa_da_referencia
 from .erros import ErroValidacao, ProcessamentoCancelado, verificar_cancelamento
 from .leitura import abrir_planilha, ler_dependente, ler_suplementar, ler_titular
-from .protecao import ocultar_senhas
+from .protecao import PADRAO_SENHA_AUTOMATICA, candidatas, ocultar_senhas
 
 COLUNAS_PENDENCIAS = [
     "REFERENCIA", "EMPRESA", "NUMERO DA SUBFATURA", "NUMERO DO CERTIFICADO",
@@ -79,7 +79,7 @@ def _mensagem_erro(e: Exception, senhas=()) -> str:
 
 
 def processar_arquivo(
-    caminho: Path, mapa: dict, cancelar=None, senhas=()
+    caminho: Path, mapa: dict, cancelar=None, senhas=(), padrao_senha=PADRAO_SENHA_AUTOMATICA
 ) -> ResultadoArquivo:
     """cancelar() e consultado entre as etapas (leitura de cada aba, datas,
     juncao); True interrompe com ProcessamentoCancelado, nunca com ERRO no log."""
@@ -93,7 +93,7 @@ def processar_arquivo(
         codigo_empresa, empresa = empresa_da_referencia(referencia, mapa)
 
         # Abre o arquivo uma unica vez para todas as abas.
-        wb = abrir_planilha(caminho, senhas)
+        wb = abrir_planilha(caminho, senhas, padrao_senha)
         abas = list(wb.sheetnames)
         aba_titular = _exatamente_uma(abas, "TITULAR", "de TITULAR")
         aba_dependente = _exatamente_uma(abas, "DEPENDENT", "de DEPENDENTE")
@@ -251,7 +251,7 @@ def processar_arquivo(
             arquivo=arquivo,
             referencia=referencia,
             status="ERRO",
-            mensagem=_mensagem_erro(e, senhas),
+            mensagem=_mensagem_erro(e, candidatas(caminho, senhas, padrao_senha)),
             observacoes_datas=observacoes_datas,
             divergencias_datas=divergencias_datas,
         )
@@ -378,8 +378,11 @@ def processar_arquivos(
     progresso: Callable[[int, int, str], None] | None = None,
     cancelar: Callable[[], bool] | None = None,
     senhas=(),
+    padrao_senha=PADRAO_SENHA_AUTOMATICA,
 ) -> Consolidado:
     """senhas: tentadas em ordem nos arquivos protegidos (nunca vao ao Log).
+    padrao_senha: senha automatica de cada arquivo ({apolice} = codigo apos PC
+    no nome), tentada antes das cadastradas; None desliga.
     progresso(i, total, nome) e chamado antes de cada arquivo (i comeca em 1).
     cancelar() e consultado antes de cada arquivo, entre as etapas de cada
     arquivo e antes da consolidacao; True interrompe com ProcessamentoCancelado."""
@@ -388,7 +391,8 @@ def processar_arquivos(
     for i, caminho in enumerate(caminhos, start=1):
         verificar_cancelamento(cancelar)
         avisar_progresso(progresso, i, total, Path(caminho).name)
-        resultados.append(processar_arquivo(caminho, mapa, cancelar=cancelar, senhas=senhas))
+        resultados.append(processar_arquivo(
+            caminho, mapa, cancelar=cancelar, senhas=senhas, padrao_senha=padrao_senha))
     verificar_cancelamento(cancelar)
 
     # Adiciona um arquivo por vez para registrar no log uma eventual incompatibilidade.

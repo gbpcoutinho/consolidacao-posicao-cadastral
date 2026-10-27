@@ -50,15 +50,19 @@ def test_senha_errada_vira_erro_do_arquivo(tmp_path):
     cifrado, _ = _cifrado(tmp_path)
     r = processar_arquivo(cifrado, MAPA, senhas=["errada", "outra"])
     assert r.status == "ERRO"
-    assert r.mensagem == "Arquivo protegido por senha: nenhuma das senhas cadastradas abriu o arquivo."
+    assert r.mensagem == "Arquivo protegido por senha: nenhuma senha cadastrada abriu o arquivo."
 
 
 def test_sem_senha_cadastrada_vira_erro_do_arquivo(tmp_path):
     cifrado, _ = _cifrado(tmp_path)
     for senhas in ((), [], [""]):
-        r = processar_arquivo(cifrado, MAPA, senhas=senhas)
+        # Sem a automatica, nao ha nenhuma candidata.
+        r = processar_arquivo(cifrado, MAPA, senhas=senhas, padrao_senha=None)
         assert r.status == "ERRO"
         assert r.mensagem == "Arquivo protegido por senha; cadastre a senha na aba Seguranca."
+        # Com a automatica (padrao) que nao serviu, a mensagem diz o que fazer.
+        r = processar_arquivo(cifrado, MAPA, senhas=senhas, padrao_senha="{apolice}#teste")
+        assert r.mensagem.endswith("(automatica e cadastradas). Cadastre a senha na aba Seguranca.")
 
 
 def test_arquivo_sem_senha_nao_muda_com_ou_sem_senhas(tmp_path):
@@ -84,7 +88,7 @@ def test_erro_de_um_arquivo_nao_derruba_os_demais(tmp_path):
     cifrado, _ = _cifrado(tmp_path / "e2", nome="PC456 10.2026.xlsx", senha="outra")
     c = processar_arquivos([ok, cifrado], MAPA, senhas=[SEGREDO])
     assert c.log["STATUS"].tolist() == ["OK", "ERRO"]
-    assert "nenhuma das senhas" in c.log.iloc[1]["MENSAGEM"]
+    assert "nenhuma senha cadastrada abriu o arquivo" in c.log.iloc[1]["MENSAGEM"]
 
 
 def test_senhas_chegam_por_pipeline_processar(tmp_path):

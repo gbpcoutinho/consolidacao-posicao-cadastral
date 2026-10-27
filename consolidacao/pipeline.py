@@ -8,7 +8,7 @@ from typing import Callable
 from .erros import ErroInesperado, ErroValidacao, ProcessamentoCancelado
 from .exportacao import escrever_excel
 from .processamento import Consolidado, avisar_progresso, processar_arquivos
-from .protecao import ocultar_senhas
+from .protecao import PADRAO_SENHA_AUTOMATICA, ocultar_senhas
 
 # Nome passado ao progresso depois do ultimo arquivo, durante a gravacao.
 ETAPA_GRAVACAO = "Gravando arquivo de saida"
@@ -61,15 +61,17 @@ def processar(
     progresso: Callable[[int, int, str], None] | None = None,
     cancelar: Callable[[], bool] | None = None,
     senhas=(),
+    padrao_senha=PADRAO_SENHA_AUTOMATICA,
 ) -> Consolidado:
     """Processa os arquivos sem gravar nada.
 
-    senhas: tentadas em ordem nos arquivos protegidos por senha.
+    senhas: tentadas em ordem nos arquivos protegidos por senha, depois da
+    automatica (padrao_senha com {apolice}; None desliga).
     progresso(i, total, nome) e chamado antes de cada arquivo; cancelar() True
     interrompe com ProcessamentoCancelado."""
     return _protegido(
         processar_arquivos, arquivos, mapa, progresso=progresso, cancelar=cancelar,
-        senhas=senhas, _segredos=senhas,
+        senhas=senhas, padrao_senha=padrao_senha, _segredos=[*senhas, padrao_senha],
     )
 
 
@@ -106,6 +108,7 @@ def executar(
     arquivo_empresas: Path | None = None,
     senhas=(),
     senha_saida: str | None = None,
+    padrao_senha=PADRAO_SENHA_AUTOMATICA,
 ) -> Consolidado:
     """Processa os arquivos e grava o Excel consolidado em `saida`.
 
@@ -116,7 +119,8 @@ def executar(
     saida = Path(saida)
     # Valida antes de processar: nao vale gastar minutos para recusar a saida.
     _protegido(_validar_saida, saida, arquivos, arquivo_empresas)
-    resultado = processar(arquivos, mapa, progresso=progresso, cancelar=cancelar, senhas=senhas)
+    resultado = processar(arquivos, mapa, progresso=progresso, cancelar=cancelar, senhas=senhas,
+                          padrao_senha=padrao_senha)
     gravar(
         resultado, saida, arquivos, arquivo_empresas=arquivo_empresas, progresso=progresso,
         senha_saida=senha_saida,

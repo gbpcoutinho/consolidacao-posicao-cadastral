@@ -237,7 +237,7 @@ def test_c7_arquivo_corrompido_tem_mensagem_em_portugues(tmp_path, conteudo):
 def test_c7_arquivo_em_uso_tem_mensagem_em_portugues(tmp_path, monkeypatch):
     import consolidacao.processamento as processamento
 
-    def em_uso(caminho, senhas=()):
+    def em_uso(caminho, senhas=(), padrao=None):
         raise PermissionError(13, "Permission denied", str(caminho))
 
     monkeypatch.setattr(processamento, "abrir_planilha", em_uso)

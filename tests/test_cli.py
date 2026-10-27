@@ -74,4 +74,4 @@ def test_cli_arquivo_protegido_sem_senha_e_erro_do_arquivo(tmp_path, capsys):
                    "--saida", str(tmp_path / "r.xlsx")])
     out = capsys.readouterr().out
     assert codigo == 0 and "Arquivos com erro: 1" in out
-    assert "cadastre a senha na aba Seguranca" in out
+    assert "cadastre a senha na aba seguranca" in out.casefold()
