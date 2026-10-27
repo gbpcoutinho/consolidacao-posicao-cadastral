@@ -2,6 +2,8 @@
 # PyInstaller, modo pasta (--onedir). Gere com scripts\gerar_exe.ps1.
 import os
 
+from PyInstaller.utils.hooks import collect_submodules
+
 raiz = SPECPATH
 
 a = Analysis(
@@ -9,7 +11,8 @@ a = Analysis(
     pathex=[raiz],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    # msoffcrypto importa os formatos (ooxml, ole...) por dentro do pacote.
+    hiddenimports=collect_submodules('msoffcrypto'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

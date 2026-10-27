@@ -2,6 +2,7 @@
 
 Conversao em Python do TRATAMENTO.R. Uso:
     python tratamento.py [--entrada PASTA] [--empresas CSV] [--saida XLSX]
+                         [--senha SENHA ...] [--senha-saida SENHA]
 Sem argumentos, usa a pasta PC_CONSOLIDADO_<mes>_<ano> ao lado deste script.
 """
 import argparse
@@ -31,6 +32,14 @@ def main(argv: list | None = None, hoje: date | None = None) -> int:
     parser.add_argument("--entrada", type=Path, default=pasta_padrao(raiz, hoje))
     parser.add_argument("--empresas", type=Path, default=raiz / "COD_EMPRESAS.csv")
     parser.add_argument("--saida", type=Path, default=None)
+    parser.add_argument(
+        "--senha", action="append", default=[],
+        help="senha de arquivos de entrada protegidos; repita para varias (testadas em ordem)",
+    )
+    parser.add_argument(
+        "--senha-saida", default=None,
+        help="protege o arquivo consolidado com esta senha (omitida = sem senha)",
+    )
     args = parser.parse_args(argv)
     saida = args.saida or args.entrada / nome_saida(hoje)
 
@@ -41,6 +50,7 @@ def main(argv: list | None = None, hoje: date | None = None) -> int:
         resultado = executar(
             arquivos, mapa, saida, arquivo_empresas=args.empresas,
             progresso=_mostrar_progresso,
+            senhas=args.senha, senha_saida=args.senha_saida,
         )
     except ErroValidacao as e:
         print(f"Erro: {e}")
@@ -61,7 +71,7 @@ def main(argv: list | None = None, hoje: date | None = None) -> int:
         for arquivo, mensagem in r["erros"]:
             print(f" - {arquivo} : {mensagem} ")
     print("====================================")
-    print(f"Arquivo gerado: {saida} ")
+    print(f"Arquivo gerado: {saida} " + ("(protegido por senha) " if args.senha_saida else ""))
     print("Abas: Base Tratada, Pendencias, Log")
     return 0
 
