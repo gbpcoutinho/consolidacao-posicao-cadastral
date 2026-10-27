@@ -21,7 +21,7 @@ from consolidacao.pipeline import ETAPA_GRAVACAO, gravar, processar, resumir
 
 from . import NOME_APP, VERSAO
 from . import empresas_compartilhadas as ec
-from .config import carregar_config, salvar_config
+from .config import carregar_config, guardar_senhas, ler_senhas, salvar_config
 from .selecao import (
     adicionar,
     adicionar_pasta,
@@ -37,6 +37,7 @@ from .tarefas import Trabalho
 INTERVALO_MS = 100
 DIAS_CACHE_VELHO = 7
 AMARELO = "#fff3b0"
+MASCARA_SENHA = "•"
 
 log = logging.getLogger(__name__)
 
@@ -145,6 +146,7 @@ class App:
         self.salvo = True
         self.ultimo_salvo = None
         self.saida_pendente = None
+        self.saida_protegida = False
         self.fechando = False
 
         raiz.title(f"{NOME_APP} {VERSAO}")
@@ -174,8 +176,73 @@ class App:
         self.aba_empresas = ttk.Frame(self.abas, padding=8)
         self.abas.add(self.aba_consolidar, text="Consolidar")
         self.abas.add(self.aba_empresas, text="Empresas")
+        self.aba_seguranca = ttk.Frame(self.abas, padding=8)
+        self.abas.add(self.aba_seguranca, text="Segurança")
         self._montar_consolidar(self.aba_consolidar)
         self._montar_empresas(self.aba_empresas)
+        self._montar_seguranca(self.aba_seguranca)
+
+    def _montar_seguranca(self, f):
+        quadro = ttk.LabelFrame(f, text="Senhas de arquivos", padding=10)
+        quadro.pack(fill="x")
+        quadro.columnconfigure(1, weight=1)
+        self.campo_senhas_entrada = tk.StringVar()
+        self.campo_senha_saida = tk.StringVar()
+        entrada, saida = ler_senhas(self.cfg)
+        self.campo_senhas_entrada.set(";".join(entrada))
+        self.campo_senha_saida.set(saida)
+
+        ttk.Label(quadro, text="Senhas de entrada").grid(row=0, column=0, sticky="w", pady=4)
+        self.ent_senhas_entrada = ttk.Entry(
+            quadro, textvariable=self.campo_senhas_entrada, show=MASCARA_SENHA)
+        self.ent_senhas_entrada.grid(row=0, column=1, sticky="ew", padx=8)
+        ttk.Label(quadro, text="Separe várias senhas por ponto e vírgula (;). Cada uma é "
+                               "testada, em ordem, nos arquivos protegidos.",
+                  foreground="#555555").grid(row=1, column=1, sticky="w", padx=8)
+        ttk.Label(quadro, text="Senha do arquivo de saída").grid(
+            row=2, column=0, sticky="w", pady=(10, 4))
+        self.ent_senha_saida = ttk.Entry(
+            quadro, textvariable=self.campo_senha_saida, show=MASCARA_SENHA)
+        self.ent_senha_saida.grid(row=2, column=1, sticky="ew", padx=8)
+        ttk.Label(quadro, text="Vazia = o arquivo consolidado é gravado sem senha.",
+                  foreground="#555555").grid(row=3, column=1, sticky="w", padx=8)
+
+        botoes = ttk.Frame(quadro)
+        botoes.grid(row=4, column=1, sticky="w", padx=8, pady=(12, 0))
+        self.bt_mostrar_senhas = ttk.Button(botoes, text="Mostrar",
+                                            command=self.alternar_mostrar_senhas)
+        self.bt_mostrar_senhas.pack(side="left")
+        self.bt_salvar_senhas = ttk.Button(botoes, text="Salvar", command=self.salvar_senhas)
+        self.bt_salvar_senhas.pack(side="left", padx=8)
+        self.texto_senhas = tk.StringVar(value="")
+        ttk.Label(f, textvariable=self.texto_senhas).pack(anchor="w", pady=8)
+        ttk.Label(f, text="As senhas ficam neste computador, cifradas para o seu usuário do "
+                          "Windows. Elas não aparecem no Log, nos registros nem em mensagens.",
+                  foreground="#555555", wraplength=700, justify="left").pack(anchor="w")
+
+    def alternar_mostrar_senhas(self):
+        mostrar = str(self.ent_senha_saida.cget("show")) != ""
+        for e in (self.ent_senhas_entrada, self.ent_senha_saida):
+            e.config(show="" if mostrar else MASCARA_SENHA)
+        self.bt_mostrar_senhas.config(text="Ocultar" if mostrar else "Mostrar")
+
+    def _senhas_entrada(self) -> list:
+        partes = (p.strip() for p in self.campo_senhas_entrada.get().split(";"))
+        return list(dict.fromkeys(p for p in partes if p))
+
+    def _senha_saida(self) -> str:
+        return self.campo_senha_saida.get()
+
+    def salvar_senhas(self):
+        guardar_senhas(self.cfg, self._senhas_entrada(), self._senha_saida())
+        try:
+            salvar_config(self.pasta_dados, self.cfg)
+        except OSError as e:
+            self.dialogos.erro("Erro ao salvar as senhas",
+                               f"Não foi possível gravar as preferências: {e}")
+            return
+        self.campo_senhas_entrada.set(";".join(self._senhas_entrada()))
+        self.texto_senhas.set("Senhas salvas.")
 
     def _faixa(self, pai):
         # Container sempre presente no topo da aba; a faixa aparece dentro dele.
@@ -537,7 +604,11 @@ class App:
         self._limpar_resumo()
         self.barra.config(maximum=len(caminhos), value=0)
         self.texto_progresso.set("Iniciando...")
-        self._iniciar("processar", lambda p, c: self.processar_fn(caminhos, mapa, p, c))
+        # So repassa o que foi cadastrado: sem senhas a chamada e a de sempre.
+        senhas = self._senhas_entrada()
+        extras = {"senhas": senhas} if senhas else {}
+        self.saida_protegida = bool(self._senha_saida())
+        self._iniciar("processar", lambda p, c: self.processar_fn(caminhos, mapa, p, c, **extras))
 
     def processar_de_novo(self):
         self.abas.select(self.aba_consolidar)
@@ -602,7 +673,9 @@ class App:
                 self.salvo = True
                 self.ultimo_salvo = self.saida_pendente
                 self.texto_progresso.set("")
-                self.texto_salvo.set(f"Salvo em {self.ultimo_salvo}")
+                self.texto_salvo.set(
+                    f"Salvo em {self.ultimo_salvo}"
+                    + (" (protegido por senha)" if self.saida_protegida else ""))
         elif evento.tipo == "cancelado":
             self.barra.config(value=0)
             self.texto_progresso.set("Processamento cancelado.")
@@ -636,6 +709,8 @@ class App:
         self.resumo_origem.set(
             "Relação de empresas: rede" if origem.origem == "rede"
             else f"Relação de empresas: cópia local de {_data(origem.data_cache)}")
+        if self.saida_protegida:
+            self.resumo_origem.set(self.resumo_origem.get() + "  |  Saída protegida por senha")
         self.repetidos = 0
         for n, linha in enumerate(c.log.to_dict("records")):
             if linha["STATUS"] == "ERRO":
@@ -710,8 +785,11 @@ class App:
             list(getattr(self, "caminhos_processados", [])) + [i.caminho for i in self.itens]))
         empresas = self.caminho_relacao
         self.texto_progresso.set("Gravando o arquivo de saída...")
+        senha_saida = self._senha_saida()
+        extras = {"senha_saida": senha_saida} if senha_saida else {}
+        self.saida_protegida = bool(senha_saida)
         self._iniciar("gravar", lambda p, c: self.gravar_fn(
-            resultado, destino, caminhos, arquivo_empresas=empresas, progresso=p))
+            resultado, destino, caminhos, arquivo_empresas=empresas, progresso=p, **extras))
 
     def abrir_arquivo(self):
         if self.ultimo_salvo:
