@@ -114,7 +114,9 @@ def _app(raiz, dados, **kw):
     from app.janela import App
 
     kw.setdefault("primeiro_uso_automatico", False)
-    return App(raiz, dados, **kw)
+    app = App(raiz, dados, **kw)
+    _rodar_ate(raiz, lambda: not app.ocupado)  # leitura inicial da relacao (segundo plano)
+    return app
 
 
 def test_janela_abre_e_fecha(raiz, tmp_path):
@@ -179,9 +181,12 @@ def test_salvar_avisa_entrada_alterada_e_reprocessa(raiz, ambiente, tmp_path):
     _rodar_ate(raiz, lambda: app.resultado is not None)
     arquivos[0].write_bytes(arquivos[0].read_bytes() + b"\0")  # alguem trocou a planilha
     app.salvar_como()
+    _rodar_ate(raiz, lambda: dialogos.perguntas)
     assert "mudou desde o processamento" in dialogos.perguntas[0]
-    assert app.tipo_trabalho == "processar"  # respondeu sim: reprocessa em vez de salvar
-    _rodar_ate(raiz, lambda: app.resultado is not None)
+    # Respondeu sim: reprocessa (rele a relacao e processa) em vez de salvar.
+    assert app.tipo_trabalho in ("relacao", "processar")
+    _rodar_ate(raiz, lambda: not app.ocupado and app.resultado is not None)
+    assert app.resumo_topo.get() == "3 OK, 0 com erro"
     assert not (tmp_path / "x.xlsx").exists()
 
 
@@ -214,7 +219,7 @@ def test_cancelar_no_meio(raiz, ambiente):
     app = _app(raiz, dados, dialogos=Dialogos(), processar_fn=lento)
     app.adicionar_caminhos(arquivos)
     app.processar()
-    assert comecou.wait(5)
+    _rodar_ate(raiz, comecou.is_set)
     app.cancelar()
     _rodar_ate(raiz, lambda: app.tipo_trabalho is None)
     assert app.texto_progresso.get() == "Processamento cancelado."
@@ -237,6 +242,7 @@ def test_fechar_durante_processamento_pergunta_e_cancela(raiz, ambiente):
     app = _app(raiz, dados, dialogos=dialogos, processar_fn=lento)
     app.adicionar_caminhos(arquivos)
     app.processar()
+    _rodar_ate(raiz, lambda: app.tipo_trabalho == "processar")
     app.fechar()  # respondeu nao: continua aberto
     assert raiz.winfo_exists() and app.tipo_trabalho == "processar"
     app.fechar()  # respondeu sim: cancela e fecha
@@ -267,6 +273,7 @@ def test_incluir_empresa_grava_na_rede_e_atualiza_lista(raiz, ambiente, tmp_path
     app.campo_empresa.set("  DELTA FICTICIA  ")
     app.campo_cod.set("90009")
     app.incluir_empresa()
+    _rodar_ate(raiz, lambda: not app.ocupado)
     from consolidacao.empresas import carregar_mapa_empresas
 
     assert carregar_mapa_empresas(rede)["90009"] == "DELTA FICTICIA"
@@ -341,6 +348,7 @@ def test_relacao_invalida_recarrega_tabela_e_seleciona_pela_chave(raiz, ambiente
     texto = rede.read_bytes().decode("utf-8-sig") + "OUTRA EMPRESA;90002;\r\n"
     rede.write_bytes(texto.encode("utf-8-sig"))
     app.processar()
+    _rodar_ate(raiz, lambda: dialogos.erros)
     assert "mais de uma EMPRESA" in dialogos.erros[-1]
     mostradas = [app.tree_empresas.item(i, "values")[0] for i in app.tree_empresas.get_children()]
     assert "OUTRA EMPRESA" in mostradas  # a tabela mostra a relacao que esta na rede
@@ -355,6 +363,7 @@ def test_relacao_invalida_recarrega_tabela_e_seleciona_pela_chave(raiz, ambiente
     app.tree_empresas.selection_set(outra)
     raiz.update()
     app.excluir_empresa()
+    _rodar_ate(raiz, lambda: not app.ocupado)
     from consolidacao.empresas import carregar_mapa_empresas
 
     assert carregar_mapa_empresas(rede)["90002"] == "BETA SERVICOS EXEMPLO S A"
@@ -366,3 +375,60 @@ def test_selecao_de_empresa_e_pela_chave(raiz, ambiente):
     app = _app(raiz, dados, dialogos=Dialogos())
     app.busca.set("BETA")
     assert app.tree_empresas.get_children() == ("90002",)
+
+
+def _lento(funcao, segundos=1.0):
+    def embrulho(*a, **k):
+        time.sleep(segundos)
+        return funcao(*a, **k)
+    return embrulho
+
+
+def _contar_ticks(raiz):
+    ticks = []
+
+    def tick():
+        ticks.append(time.monotonic())
+        raiz.after(20, tick)
+
+    raiz.after(20, tick)
+    return ticks
+
+
+def test_rede_lenta_nao_trava_a_janela(raiz, ambiente, monkeypatch):
+    from app import janela
+
+    dados, rede, arquivos = ambiente
+    monkeypatch.setattr(janela.ec, "ler", _lento(janela.ec.ler))
+    inicio = time.monotonic()
+    app = janela.App(raiz, dados, dialogos=Dialogos(), primeiro_uso_automatico=False,
+                     processar_fn=lambda c, m, p, k: _consolidado_falso(3))
+    assert time.monotonic() - inicio < 0.5  # a janela aparece antes da leitura da rede
+    assert "Lendo relação" in app.texto_progresso.get()
+    _rodar_ate(raiz, lambda: app.relacao is not None)
+    app.adicionar_caminhos(arquivos)
+    ticks = _contar_ticks(raiz)
+    inicio = time.monotonic()
+    app.processar()  # rele a relacao antes de processar
+    assert time.monotonic() - inicio < 0.5
+    assert "Lendo relação" in app.texto_progresso.get()
+    _rodar_ate(raiz, lambda: app.resultado is not None)
+    assert len(ticks) > 10  # o loop do Tk seguiu rodando durante a leitura lenta
+
+
+def test_gravacao_lenta_da_relacao_nao_trava_a_janela(raiz, ambiente, monkeypatch):
+    from app import janela
+
+    dados, rede, arquivos = ambiente
+    app = _app(raiz, dados, dialogos=Dialogos())
+    monkeypatch.setattr(janela.ec, "aplicar", _lento(janela.ec.aplicar))
+    app.campo_empresa.set("DELTA FICTICIA")
+    app.campo_cod.set("90009")
+    inicio = time.monotonic()
+    app.incluir_empresa()
+    assert time.monotonic() - inicio < 0.5
+    assert str(app.bt_incluir.cget("state")) == "disabled"  # nada de clique duplo
+    _rodar_ate(raiz, lambda: not app.ocupado)
+    from consolidacao.empresas import carregar_mapa_empresas
+
+    assert carregar_mapa_empresas(rede)["90009"] == "DELTA FICTICIA"

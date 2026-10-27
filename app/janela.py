@@ -319,28 +319,52 @@ class App:
         valor = self.cfg.get("arquivo_empresas")
         return Path(valor) if valor else None
 
-    def carregar_relacao(self, mostrar_erro=True) -> bool:
-        caminho = self.caminho_relacao
-        try:
-            if caminho is None:
-                # Sem caminho configurado so serve o cache (se houver).
-                caminho = self.pasta_dados / "sem_relacao_configurada.csv"
-            self.relacao = ec.ler(caminho, self.pasta_dados)
-            # A tabela sempre mostra a relacao em memoria, mesmo invalida: e
-            # assim que a pessoa ve (e corrige) a duplicata.
-            self._preencher_empresas()
-            self.mapa = ec.mapa(self.relacao)
-        except ErroValidacao as e:
+    def _caminho_para_ler(self):
+        # Sem caminho configurado so serve o cache (se houver).
+        return self.caminho_relacao or self.pasta_dados / "sem_relacao_configurada.csv"
+
+    @staticmethod
+    def _tarefa_ler(caminho, pasta_dados):
+        """Roda fora da thread do Tk: a rede pode levar dezenas de segundos."""
+        def tarefa():
+            try:
+                relacao = ec.ler(caminho, pasta_dados)
+            except ErroValidacao as e:
+                return None, None, str(e)
+            try:
+                return relacao, ec.mapa(relacao), None
+            except ErroValidacao as e:
+                return relacao, None, str(e)
+        return tarefa
+
+    def carregar_relacao(self, mostrar_erro=True, depois=None) -> None:
+        """Le a relacao em segundo plano; depois() roda (na thread do Tk) so se
+        a relacao lida for valida."""
+        def aplicar(resultado):
+            if self._aplicar_leitura(resultado, mostrar_erro) and depois is not None:
+                depois()
+
+        self._em_segundo_plano("relacao", self._tarefa_ler(self._caminho_para_ler(),
+                                                            self.pasta_dados),
+                               aplicar, "Lendo relação de empresas...")
+
+    def _aplicar_leitura(self, resultado, mostrar_erro) -> bool:
+        relacao, mapa, erro = resultado
+        if relacao is not None:
+            self.relacao = relacao
+        # A tabela sempre mostra a relacao em memoria, mesmo invalida: e assim
+        # que a pessoa ve (e corrige) a duplicata.
+        self._preencher_empresas()
+        if erro is not None:
             # Relacao ilegivel ou invalida: nada processa com ela.
             self.mapa = {}
-            self._preencher_empresas()
             if mostrar_erro:
-                self.dialogos.erro("Relação de empresas", str(e))
+                self.dialogos.erro("Relação de empresas", erro)
             self._atualizar_estado_relacao()
             return False
+        self.mapa = mapa
         self.itens = atualizar_empresas(self.itens, self.mapa)
         self._preencher_arquivos()
-        self._preencher_empresas()
         self._atualizar_estado_relacao()
         return True
 
@@ -358,10 +382,7 @@ class App:
             self.bloqueio.pack(fill="x", side="top", pady=(0, 6))
         else:
             self.bloqueio.pack_forget()
-        edicao = "normal" if (r is not None and r.origem == "rede"
-                              and self.caminho_relacao is not None) else "disabled"
-        for b in (self.bt_incluir, self.bt_editar, self.bt_excluir):
-            b.config(state=edicao)
+        edicao = "normal" if self._pode_editar() else "disabled"
         self._atualizar_botoes()
         if r is None:
             self.rodape.set("Relação de empresas não configurada.")
@@ -372,29 +393,46 @@ class App:
                             f"{_data(r.lida_em)}  |  origem: {origem}{sem_rede}")
 
     def configurar_relacao(self):
+        if self.ocupado:
+            # Abertura automatica enquanto a 1a leitura ainda roda: espera.
+            self.raiz.after(200, self.configurar_relacao)
+            return
         escolha = self.dialogos.primeiro_uso()
         if escolha is None:
             return
-        try:
-            if escolha:
-                caminho = self.dialogos.escolher_relacao()
-                if not caminho:
-                    return
-                ec.ler(caminho, self.pasta_dados)  # valida que da para ler
-            else:
-                origem = self.dialogos.escolher_csv_origem()
-                if not origem:
-                    return
-                caminho = self.dialogos.escolher_destino_relacao()
-                if not caminho:
-                    return
-                ec.criar_a_partir_de_csv(origem, caminho)
-        except ErroValidacao as e:
-            self.dialogos.erro("Relação de empresas", str(e))
-            return
-        self.cfg["arquivo_empresas"] = str(caminho)
-        salvar_config(self.pasta_dados, self.cfg)
-        self.carregar_relacao()
+        if escolha:
+            caminho = self.dialogos.escolher_relacao()
+            if not caminho:
+                return
+            origem = None
+        else:
+            origem = self.dialogos.escolher_csv_origem()
+            if not origem:
+                return
+            caminho = self.dialogos.escolher_destino_relacao()
+            if not caminho:
+                return
+        pasta = self.pasta_dados
+
+        def tarefa():
+            try:
+                if origem is None:
+                    ec.ler(caminho, pasta)  # valida que da para ler
+                else:
+                    ec.criar_a_partir_de_csv(origem, caminho)
+            except ErroValidacao as e:
+                return str(e)
+            return None
+
+        def depois(erro):
+            if erro is not None:
+                self.dialogos.erro("Relação de empresas", erro)
+                return
+            self.cfg["arquivo_empresas"] = str(caminho)
+            salvar_config(self.pasta_dados, self.cfg)
+            self.carregar_relacao()
+
+        self._em_segundo_plano("relacao", tarefa, depois, "Lendo relação de empresas...")
 
     def sobre(self):
         self.dialogos.informar("Sobre", f"{NOME_APP}\nVersão {VERSAO}")
@@ -461,12 +499,22 @@ class App:
         aberto = "normal" if (self.ultimo_salvo is not None and not ocupado) else "disabled"
         self.bt_abrir_arquivo.config(state=aberto)
         self.bt_abrir_pasta.config(state=aberto)
+        edicao = "normal" if (self._pode_editar() and not ocupado) else "disabled"
+        for b in (self.bt_incluir, self.bt_editar, self.bt_excluir):
+            b.config(state=edicao)
+
+    def _pode_editar(self) -> bool:
+        r = self.relacao
+        return r is not None and r.origem == "rede" and self.caminho_relacao is not None
 
     def processar(self):
         if self.ocupado or not self.itens:
             return
-        # A relacao e relida logo antes de processar.
-        if not self.carregar_relacao():
+        # A relacao e relida logo antes de processar (fora da thread do Tk).
+        self.carregar_relacao(depois=self._processar_com_relacao)
+
+    def _processar_com_relacao(self):
+        if self.ocupado or not self.itens:
             return
         alertas = alertas_pre_processamento(self.itens)
         r = self.relacao
@@ -501,6 +549,13 @@ class App:
             self.texto_progresso.set("Cancelando...")
             self.bt_cancelar.config(state="disabled")
 
+    def _em_segundo_plano(self, tipo, tarefa, depois, texto):
+        """tarefa() roda numa thread (nunca toca em widget); depois(resultado)
+        roda na thread do Tk quando ela termina."""
+        self._continuacao = depois
+        self.texto_progresso.set(texto)
+        self._iniciar(tipo, lambda p, c: tarefa())
+
     def _iniciar(self, tipo, funcao):
         self.trabalho = Trabalho(funcao)
         self.tipo_trabalho = tipo
@@ -528,6 +583,14 @@ class App:
                 self.texto_progresso.set(f"Processando {i}/{total}: {nome}")
             return False
         self.trabalho, self.tipo_trabalho = None, None
+        if tipo in ("relacao", "empresa"):
+            self.texto_progresso.set("")
+            self._atualizar_botoes()
+            if evento.tipo == "concluido":
+                self._continuacao(evento.dados)
+            else:
+                self.dialogos.erro("Relação de empresas", evento.dados)
+            return True
         if evento.tipo == "concluido":
             if tipo == "processar":
                 self.barra.config(value=self.barra.cget("maximum"))
@@ -601,12 +664,21 @@ class App:
     def salvar_como(self):
         if self.resultado is None or self.ocupado:
             return
-        atual = self.relacao
-        try:
-            atual = ec.ler(self.caminho_relacao or self.pasta_dados / "sem_relacao.csv",
-                           self.pasta_dados)
-        except ErroValidacao:
-            pass
+        caminho, pasta = self._caminho_para_ler(), self.pasta_dados
+
+        def tarefa():
+            try:
+                return ec.ler(caminho, pasta)
+            except ErroValidacao:
+                return None
+
+        self._em_segundo_plano("relacao", tarefa, self._salvar_com_relacao,
+                               "Lendo relação de empresas...")
+
+    def _salvar_com_relacao(self, atual):
+        if self.resultado is None or self.ocupado:
+            return
+        atual = atual or self.relacao
         avisos = mudancas(self.retrato, self.itens, atual)
         if avisos and self.dialogos.perguntar(
                 "Algo mudou desde o processamento",
@@ -701,43 +773,60 @@ class App:
         self.texto_validacao.set(mensagem)
         return mensagem
 
-    def _aplicar(self, alteracao) -> bool:
-        try:
-            self.relacao = ec.aplicar(self.caminho_relacao, self.relacao, alteracao,
-                                      self.usuario, self.maquina, pasta_dados=self.pasta_dados)
-        except ec.ConflitoEdicao as e:
-            self.dialogos.avisar("Relação de empresas", str(e))
-            self.carregar_relacao()
-            return False
-        except ErroValidacao as e:
-            # Inclui EmUso: a edicao continua no formulario para tentar de novo
-            # e a tabela volta a mostrar a relacao em memoria (nada foi gravado).
-            self.dialogos.erro("Relação de empresas", str(e))
+    def _aplicar(self, alteracao, depois=None) -> None:
+        caminho, base, pasta = self.caminho_relacao, self.relacao, self.pasta_dados
+        usuario, maquina = self.usuario, self.maquina
+
+        def tarefa():
+            try:
+                relacao = ec.aplicar(caminho, base, alteracao, usuario, maquina,
+                                     pasta_dados=pasta)
+            except ec.ConflitoEdicao as e:
+                return "conflito", str(e)
+            except ErroValidacao as e:
+                return "erro", str(e)
+            return "ok", (relacao, ec.mapa(relacao))
+
+        def aplicada(resultado):
+            situacao, dados = resultado
+            if situacao == "conflito":
+                self.dialogos.avisar("Relação de empresas", dados)
+                self.carregar_relacao()
+                return
+            if situacao == "erro":
+                # Inclui EmUso: a edicao continua no formulario para tentar de
+                # novo e a tabela volta a mostrar a relacao em memoria.
+                self.dialogos.erro("Relação de empresas", dados)
+                self._preencher_empresas()
+                return
+            self.relacao, self.mapa = dados
+            self.itens = atualizar_empresas(self.itens, self.mapa)
+            self._preencher_arquivos()
             self._preencher_empresas()
-            return False
-        self.mapa = ec.mapa(self.relacao)
-        self.itens = atualizar_empresas(self.itens, self.mapa)
-        self._preencher_arquivos()
-        self._preencher_empresas()
-        self._atualizar_estado_relacao()
-        return True
+            self._atualizar_estado_relacao()
+            if depois is not None:
+                depois()
+
+        self._em_segundo_plano("empresa", tarefa, aplicada,
+                               "Gravando a relação de empresas...")
 
     def incluir_empresa(self):
         if self._validar_formulario() and "já cadastrado" not in self.texto_validacao.get():
             self.dialogos.avisar("Relação de empresas", self.texto_validacao.get())
             return
-        if self._aplicar(ec.incluir(self._formulario())):
+        def incluida():
             self._limpar_formulario()
             if self.itens:
                 self.bt_reprocessar.pack(side="right")
+
+        self._aplicar(ec.incluir(self._formulario()), incluida)
 
     def editar_empresa(self):
         antiga = self._linha_selecionada()
         if antiga is None:
             self.dialogos.avisar("Relação de empresas", "Selecione a empresa a editar.")
             return
-        if self._aplicar(ec.editar(antiga, self._formulario())):
-            self._limpar_formulario()
+        self._aplicar(ec.editar(antiga, self._formulario()), self._limpar_formulario)
 
     def excluir_empresa(self):
         antiga = self._linha_selecionada()
@@ -748,8 +837,7 @@ class App:
                 "Excluir empresa",
                 f"Excluir {antiga.empresa} (COD_SAUDE {antiga.cod_saude}) da relação?"):
             return
-        if self._aplicar(ec.excluir(antiga)):
-            self._limpar_formulario()
+        self._aplicar(ec.excluir(antiga), self._limpar_formulario)
 
     def _limpar_formulario(self):
         self.tree_empresas.selection_remove(*self.tree_empresas.selection())
@@ -765,8 +853,8 @@ class App:
                                            "O processamento está em andamento. Cancelar e fechar?"):
                 return
             self.trabalho.cancelar()
-        elif self.tipo_trabalho == "gravar":
-            self.dialogos.avisar("Fechar", "Aguarde terminar de gravar o arquivo de saída.")
+        elif self.tipo_trabalho in ("gravar", "empresa"):
+            self.dialogos.avisar("Fechar", "Aguarde terminar a gravação em andamento.")
             return
         elif self.resultado is not None and not self.salvo:
             if not self.dialogos.perguntar("Fechar",

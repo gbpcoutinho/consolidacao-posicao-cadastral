@@ -33,6 +33,10 @@ por exemplo `C:\teste_rede\`. Marque cada passo como OK ou anote o problema.
    `C:\teste_rede` para `C:\teste_rede_off` e abra de novo. Esperado: faixa
    amarela "Usando cópia local de <data>" nas duas abas, edição bloqueada,
    processamento funcionando e resumo com "cópia local de <data>". Volte o nome.
+   Repita apontando a relação (Configurações) para um servidor que não
+   responde, ex.: `\\10.255.255.1\compartilhada\empresas.csv`: a janela abre
+   na hora com "Lendo relação de empresas..." e nunca fica "Não está
+   respondendo"; depois de ~40 s cai na cópia local.
 9. **Salvar com o destino aberto no Excel.** Abra no Excel o consolidado do
    passo 5 e salve por cima dele. Esperado: mensagem clara para fechar o
    arquivo; depois de fechar, Salvar como funciona sem reprocessar.
