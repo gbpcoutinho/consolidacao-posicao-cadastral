@@ -326,10 +326,14 @@ class App:
                 # Sem caminho configurado so serve o cache (se houver).
                 caminho = self.pasta_dados / "sem_relacao_configurada.csv"
             self.relacao = ec.ler(caminho, self.pasta_dados)
+            # A tabela sempre mostra a relacao em memoria, mesmo invalida: e
+            # assim que a pessoa ve (e corrige) a duplicata.
+            self._preencher_empresas()
             self.mapa = ec.mapa(self.relacao)
         except ErroValidacao as e:
-            if self.relacao is None:
-                self.mapa = {}
+            # Relacao ilegivel ou invalida: nada processa com ela.
+            self.mapa = {}
+            self._preencher_empresas()
             if mostrar_erro:
                 self.dialogos.erro("Relação de empresas", str(e))
             self._atualizar_estado_relacao()
@@ -653,16 +657,24 @@ class App:
         if self.relacao is None:
             return
         filtro = self.busca.get().strip().casefold()
-        for i, l in enumerate(self.relacao.linhas):
+        # iid = COD_SAUDE (com sufixo se alguem o duplicou); a selecao volta
+        # para a linha exata da relacao em memoria, nunca por posicao.
+        self._linhas_da_tabela = {}
+        vistos = {}
+        for l in self.relacao.linhas:
+            k = ec.chave(l)
+            vistos[k] = vistos.get(k, 0) + 1
+            iid = k if vistos[k] == 1 and k else f"{k}#{vistos[k]}"
+            self._linhas_da_tabela[iid] = l
             if filtro and filtro not in f"{l.empresa} {l.cod_saude} {l.cod_dental}".casefold():
                 continue
-            t.insert("", "end", iid=str(i), values=(l.empresa, l.cod_saude, l.cod_dental))
+            t.insert("", "end", iid=iid, values=(l.empresa, l.cod_saude, l.cod_dental))
 
     def _linha_selecionada(self):
         sel = self.tree_empresas.selection()
         if not sel or self.relacao is None:
             return None
-        return self.relacao.linhas[int(sel[0])]
+        return getattr(self, "_linhas_da_tabela", {}).get(sel[0])
 
     def _selecionar_empresa(self, _evento=None):
         linha = self._linha_selecionada()
@@ -698,8 +710,10 @@ class App:
             self.carregar_relacao()
             return False
         except ErroValidacao as e:
-            # Inclui EmUso: a edicao continua no formulario para tentar de novo.
+            # Inclui EmUso: a edicao continua no formulario para tentar de novo
+            # e a tabela volta a mostrar a relacao em memoria (nada foi gravado).
             self.dialogos.erro("Relação de empresas", str(e))
+            self._preencher_empresas()
             return False
         self.mapa = ec.mapa(self.relacao)
         self.itens = atualizar_empresas(self.itens, self.mapa)

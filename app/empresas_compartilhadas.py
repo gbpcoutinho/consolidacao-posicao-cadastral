@@ -270,12 +270,15 @@ def _chaves_afetadas(alteracao: Alteracao) -> set:
 
 
 def _aplicar_alteracao(linhas: list, alteracao: Alteracao) -> list:
+    """Editar e excluir miram a linha exata escolhida na tabela (os 3 campos):
+    se alguem duplicou um COD_SAUDE no Excel, corrigir a linha errada nao pode
+    levar junto a legitima."""
     linhas = list(linhas)
     if alteracao.tipo == "excluir":
-        k = chave(alteracao.antigo)
-        if not _da_chave(linhas, k):
-            raise ErroValidacao(f"COD_SAUDE '{k}' nao esta mais na relacao.")
-        return [l for l in linhas if chave(l) != k]
+        antigo = alteracao.antigo
+        if antigo not in linhas:
+            raise ErroValidacao(f"COD_SAUDE '{chave(antigo)}' nao esta mais na relacao.")
+        return [l for l in linhas if l != antigo]
 
     novo = validar_linha(alteracao.novo)
     k = novo.cod_saude
@@ -287,15 +290,16 @@ def _aplicar_alteracao(linhas: list, alteracao: Alteracao) -> list:
             )
         return linhas + [novo]
 
-    k_antigo = chave(alteracao.antigo)
-    posicoes = [i for i, l in enumerate(linhas) if chave(l) == k_antigo]
+    antigo = alteracao.antigo
+    posicoes = [i for i, l in enumerate(linhas) if l == antigo]
     if not posicoes:
-        raise ErroValidacao(f"COD_SAUDE '{k_antigo}' nao esta mais na relacao.")
-    if k != k_antigo and _da_chave(linhas, k):
+        raise ErroValidacao(f"COD_SAUDE '{chave(antigo)}' nao esta mais na relacao.")
+    if k != chave(antigo) and _da_chave(linhas, k):
         raise ErroValidacao(
             f"COD_SAUDE '{k}' ja esta cadastrado para '{_da_chave(linhas, k)[0].empresa}'."
         )
-    # Trocar o COD_SAUDE vale como excluir a antiga e incluir a nova.
+    # Trocar o COD_SAUDE vale como excluir a antiga e incluir a nova; copias
+    # identicas da linha escolhida somem junto.
     resultado = [l for i, l in enumerate(linhas) if i not in posicoes[1:]]
     resultado[posicoes[0]] = novo
     return resultado

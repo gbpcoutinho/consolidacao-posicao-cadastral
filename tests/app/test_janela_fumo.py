@@ -52,10 +52,17 @@ class Dialogos:
 
 @pytest.fixture
 def raiz():
-    try:
-        r = tk.Tk()
-    except tk.TclError as e:
-        pytest.skip(f"sem display para o Tk: {e}")
+    # No Windows o Tk() as vezes falha ao achar o tk.tcl logo apos outro
+    # destroy(); tenta de novo antes de concluir que nao ha display.
+    for tentativa in range(5):
+        try:
+            r = tk.Tk()
+            break
+        except tk.TclError as e:
+            erro = e
+            time.sleep(0.2)
+    else:
+        pytest.skip(f"sem display para o Tk: {erro}")
     r.withdraw()
     yield r
     try:
@@ -284,7 +291,7 @@ def test_excluir_pede_confirmacao_com_nome(raiz, ambiente):
     dados, rede, arquivos = ambiente
     dialogos = Dialogos(respostas=[False])
     app = _app(raiz, dados, dialogos=dialogos)
-    app.tree_empresas.selection_set("0")
+    app.tree_empresas.selection_set("90001")
     raiz.update()
     app.excluir_empresa()
     assert "ALFA LOGISTICA FICTICIA LTDA" in dialogos.perguntas[0]
@@ -323,3 +330,39 @@ def test_salvar_em_cima_de_entrada_removida_da_lista_e_recusado(raiz, ambiente):
     _rodar_ate(raiz, lambda: dialogos.erros)
     assert "arquivos de entrada" in dialogos.erros[0]
     assert arquivos[0].read_bytes() == original
+
+
+def test_relacao_invalida_recarrega_tabela_e_seleciona_pela_chave(raiz, ambiente):
+    dados, rede, arquivos = ambiente
+    dialogos = Dialogos()
+    app = _app(raiz, dados, dialogos=dialogos)
+    app.adicionar_caminhos(arquivos)
+    # Um colega duplica o 90002 com outra EMPRESA, editando o CSV no Excel.
+    texto = rede.read_bytes().decode("utf-8-sig") + "OUTRA EMPRESA;90002;\r\n"
+    rede.write_bytes(texto.encode("utf-8-sig"))
+    app.processar()
+    assert "mais de uma EMPRESA" in dialogos.erros[-1]
+    mostradas = [app.tree_empresas.item(i, "values")[0] for i in app.tree_empresas.get_children()]
+    assert "OUTRA EMPRESA" in mostradas  # a tabela mostra a relacao que esta na rede
+    alfa = next(i for i in app.tree_empresas.get_children()
+                if app.tree_empresas.item(i, "values")[0] == "ALFA LOGISTICA FICTICIA LTDA")
+    app.tree_empresas.selection_set(alfa)
+    raiz.update()
+    assert app.campo_empresa.get() == "ALFA LOGISTICA FICTICIA LTDA"
+    # Corrigir excluindo a linha errada mantem a BETA legitima.
+    outra = next(i for i in app.tree_empresas.get_children()
+                 if app.tree_empresas.item(i, "values")[0] == "OUTRA EMPRESA")
+    app.tree_empresas.selection_set(outra)
+    raiz.update()
+    app.excluir_empresa()
+    from consolidacao.empresas import carregar_mapa_empresas
+
+    assert carregar_mapa_empresas(rede)["90002"] == "BETA SERVICOS EXEMPLO S A"
+    assert app.mapa["90002"] == "BETA SERVICOS EXEMPLO S A"
+
+
+def test_selecao_de_empresa_e_pela_chave(raiz, ambiente):
+    dados, rede, arquivos = ambiente
+    app = _app(raiz, dados, dialogos=Dialogos())
+    app.busca.set("BETA")
+    assert app.tree_empresas.get_children() == ("90002",)

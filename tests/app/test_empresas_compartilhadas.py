@@ -340,3 +340,23 @@ def test_criar_a_partir_de_csv_nao_sobrescreve(tmp_path, rede):
     with pytest.raises(ErroValidacao, match="ja existe"):
         criar_a_partir_de_csv(origem, rede)
     assert rede.read_bytes() == antes
+
+
+DUPLICADO = CONTEUDO + "OUTRA EMPRESA;90002;\n"
+
+
+def test_excluir_linha_duplicada_nao_apaga_a_legitima(rede, dados):
+    rede.write_bytes(DUPLICADO.encode("utf-8-sig"))  # colega duplicou o 90002 no Excel
+    base = ler(rede, dados)
+    nova = _aplicar(rede, base, excluir(Linha("OUTRA EMPRESA", "90002", "")))
+    assert carregar_mapa_empresas(rede) == {"90001": "ALFA FICTICIA", "90002": "BETA FICTICIA"}
+    assert Linha("BETA FICTICIA", "90002", "") in nova.linhas
+
+
+def test_editar_linha_duplicada_so_muda_a_escolhida(rede, dados):
+    rede.write_bytes(DUPLICADO.encode("utf-8-sig"))
+    base = ler(rede, dados)
+    _aplicar(rede, base, editar(Linha("OUTRA EMPRESA", "90002", ""), Linha("OUTRA EMPRESA", "90005", "")))
+    assert carregar_mapa_empresas(rede) == {
+        "90001": "ALFA FICTICIA", "90002": "BETA FICTICIA", "90005": "OUTRA EMPRESA",
+    }
