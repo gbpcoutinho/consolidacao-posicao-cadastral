@@ -1,4 +1,5 @@
 # Formatacao e exportacao do Excel (secao 8 do TRATAMENTO.R).
+import io
 import math
 import os
 import tempfile
@@ -16,6 +17,7 @@ from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from .config import CODIGO_UNICO, LARGURA_MANUAL
 from .erros import ErroValidacao
+from .protecao import cifrar_para
 
 # O Excel aceita ate 255; textos longos ficam legiveis com quebra a partir daqui.
 LARGURA_AUTO_MAXIMA = 100
@@ -187,7 +189,9 @@ def validar_limite_linhas(c) -> None:
             )
 
 
-def escrever_excel(c, destino: Path) -> None:
+def escrever_excel(c, destino: Path, senha: str | None = None) -> None:
+    """Grava o consolidado em `destino`. Com `senha`, o arquivo e montado em
+    memoria e so a versao cifrada chega ao disco (vazia ou None = sem senha)."""
     validar_limite_linhas(c)
     # write_only: grava em fluxo, sem montar a planilha inteira na memoria.
     wb = openpyxl.Workbook(write_only=True)
@@ -205,7 +209,12 @@ def escrever_excel(c, destino: Path) -> None:
         descritor, nome = tempfile.mkstemp(dir=destino.parent, prefix="~$", suffix=".xlsx")
         os.close(descritor)
         temporario = Path(nome)
-        wb.save(temporario)
+        if senha:
+            plano = io.BytesIO()
+            wb.save(plano)
+            cifrar_para(plano, senha, temporario)
+        else:
+            wb.save(temporario)
         os.replace(temporario, destino)
         temporario = None
     except OSError as e:

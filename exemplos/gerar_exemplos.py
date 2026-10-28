@@ -1,6 +1,6 @@
 """Gera 3 planilhas de posicao cadastral FICTICIAS no formato do arquivo real.
 
-Modelo: "PC90001 10.2026 - sem dados pessoais.xlsx" (5 abas, tudo como texto,
+Modelo: "PC90001 10.2026.xlsx" (5 abas, tudo como texto,
 datas dd/mm/aa + colunas (Y2K), "00/00/0000" para data vazia, registros
 tipo 1..9 e as 2 linhas finais de totais na aba de dependentes).
 

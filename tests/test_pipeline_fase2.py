@@ -99,7 +99,7 @@ def test_gravar_excecao_inesperada_vira_erro_de_validacao(tmp_path, monkeypatch)
     arquivos = _entradas(tmp_path / "entrada")
     c = pipeline.processar(arquivos, MAPA)
 
-    def explode(c, destino):
+    def explode(c, destino, senha=None):
         raise KeyError("x")
 
     monkeypatch.setattr(pipeline, "escrever_excel", explode)
@@ -114,7 +114,7 @@ def test_gravar_memoria_e_interrupcao_passam_direto(tmp_path, monkeypatch, excec
     arquivos = _entradas(tmp_path / "entrada")
     c = pipeline.processar(arquivos, MAPA)
 
-    def explode(c, destino):
+    def explode(c, destino, senha=None):
         raise excecao()
 
     monkeypatch.setattr(pipeline, "escrever_excel", explode)

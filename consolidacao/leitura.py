@@ -32,6 +32,7 @@ from .config import (
     COLUNAS_OPCIONAIS_TITULAR,
 )
 from .datas import texto_celula, validar_colunas_data
+from .protecao import decifrar_em_memoria
 from .erros import ErroValidacao, verificar_cancelamento
 
 
@@ -367,9 +368,13 @@ def ler_linhas_brutas(wb, aba: str, cancelar=None) -> tuple:
     return _Leitor(wb, aba, cancelar).ler()
 
 
-def abrir_planilha(caminho: Path):
-    """Abre o arquivo uma vez para ler todas as abas (feche com .close())."""
-    return openpyxl.load_workbook(caminho, read_only=True, data_only=True)
+def abrir_planilha(caminho: Path, senhas=(), padrao=None):
+    """Abre o arquivo uma vez para ler todas as abas (feche com .close()).
+    Arquivo protegido por senha e decifrado em memoria com `senhas`."""
+    origem = decifrar_em_memoria(caminho, senhas, padrao)
+    return openpyxl.load_workbook(
+        caminho if origem is None else origem, read_only=True, data_only=True
+    )
 
 
 def ler_aba(caminho: Path, aba: str, skip: int = 0, wb=None, cancelar=None) -> pd.DataFrame:

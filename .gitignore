@@ -13,3 +13,9 @@ COD_EMPRESAS.csv
 build/
 dist/
 .RData
+app/recursos/
+logo_branco_GVS.png
+
+# Copias de seguranca da relacao de empresas (dados reais)
+historico/
+*.lock

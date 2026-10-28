@@ -37,3 +37,10 @@ def test_documentacao():
     assert all(f"\n{i}. " in roteiro for i in range(1, 11))
     assert "2026-10-26-fase2-app-design.md" in (RAIZ / "docs" / "fase2-app.md").read_text(
         encoding="utf-8")
+
+
+def test_recursos_so_no_executavel_e_fora_do_git():
+    spec = (RAIZ / "ConsolidadorPC.spec").read_text(encoding="utf-8")
+    assert "recursos" in spec and "icon=" in spec
+    linhas = (RAIZ / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "app/recursos/" in linhas and "logo_branco_GVS.png" in linhas

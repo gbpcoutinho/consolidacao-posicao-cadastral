@@ -158,3 +158,11 @@ FORMULA_TEXTO_SEM_CACHE = lambda ref: f'<c r="{ref}" t="str"><f>""</f></c>'  # n
 FORMULA_NUMERO_SEM_CACHE = lambda ref: f'<c r="{ref}"><f>1+1</f></c>'  # noqa: E731
 NUMERO_V_VAZIO = lambda ref: f'<c r="{ref}"><v></v></c>'  # noqa: E731
 LOGICO_V_VAZIO = lambda ref: f'<c r="{ref}" t="b"><v></v></c>'  # noqa: E731
+
+
+def cifrar_arquivo(origem: Path, destino: Path, senha: str) -> None:
+    """Copia `origem` cifrada com `senha` (formato do Excel: container CFB)."""
+    import msoffcrypto.format.ooxml
+
+    with open(origem, "rb") as plano, open(destino, "wb") as saida:
+        msoffcrypto.format.ooxml.OOXMLFile(plano).encrypt(senha, saida)
